@@ -1,5 +1,8 @@
-using cAlgo.API;
+// Original Source and Credit: https://ctrader.com/algos/cbots/show/921
+// Added Prints, Cancel orders on stop and bot stop on OCO
+// Last update: 20190702
 
+using cAlgo.API;
 namespace cAlgo
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
