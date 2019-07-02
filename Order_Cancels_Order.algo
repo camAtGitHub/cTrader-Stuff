@@ -39,7 +39,7 @@ namespace cAlgo
         [Parameter("Order #2 SL", DefaultValue = 20)]
         public double InputStopLoss2 { get; set; }
 
-        [Parameter("Order #1 TP", DefaultValue = 40)]
+        [Parameter("Order #2 TP", DefaultValue = 40)]
         public double InputTakeProfit2 { get; set; }
 
         private string _label;
