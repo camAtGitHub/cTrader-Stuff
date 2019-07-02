@@ -1,0 +1,124 @@
+using cAlgo.API;
+
+namespace cAlgo
+{
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class OCO : Robot
+    {
+        //---ORDER 1
+
+        [Parameter("Order #1 Type: buy/sell")]
+        public string InputOrderType1 { get; set; }
+
+        [Parameter("Order #1 Price", DefaultValue = 1.0)]
+        public double InputOrderPrice1 { get; set; }
+
+        [Parameter("Order #1 Size", DefaultValue = 10000)]
+        public double InputOrderSize1 { get; set; }
+
+        [Parameter("Order #1 SL", DefaultValue = 20)]
+        public double InputStopLoss1 { get; set; }
+
+        [Parameter("Order #1 TP", DefaultValue = 40)]
+        public double InputTakeProfit1 { get; set; }
+
+        //---ORDER 2
+
+        [Parameter("Order #2 Type: buy/sell")]
+        public string InputOrderType2 { get; set; }
+
+        [Parameter("Order #2 Price", DefaultValue = 1.0)]
+        public double InputOrderPrice2 { get; set; }
+
+        [Parameter("Order #2 Size", DefaultValue = 10000)]
+        public double InputOrderSize2 { get; set; }
+
+        [Parameter("Order #2 SL", DefaultValue = 20)]
+        public double InputStopLoss2 { get; set; }
+
+        [Parameter("Order #1 TP", DefaultValue = 40)]
+        public double InputTakeProfit2 { get; set; }
+
+        private string _label;
+
+        protected override void OnStart()
+        {
+            Print("Bot: Starting");
+            _label = string.Format("{0}{1}{2}", Symbol.Code, TimeFrame, Server.Time.Ticks);
+            PendingOrders.Filled += PendingOrders_Filled;
+
+            if (InputOrderType1.ToLower() == "sell")
+            {
+                if (InputOrderPrice1 > MarketSeries.Close.LastValue)
+                    PlaceLimitOrder(TradeType.Sell, Symbol, InputOrderSize1, InputOrderPrice1, _label, InputStopLoss1, InputTakeProfit1);
+                else
+                    PlaceStopOrder(TradeType.Sell, Symbol, InputOrderSize1, InputOrderPrice1, _label, InputStopLoss1, InputTakeProfit1);
+            }
+            else if (InputOrderType1.ToLower() == "buy")
+            {
+                if (InputOrderPrice1 > MarketSeries.Close.LastValue)
+                    PlaceStopOrder(TradeType.Buy, Symbol, InputOrderSize1, InputOrderPrice1, _label, InputStopLoss1, InputTakeProfit1);
+                else
+                    PlaceLimitOrder(TradeType.Buy, Symbol, InputOrderSize1, InputOrderPrice1, _label, InputStopLoss1, InputTakeProfit1);
+            }
+            else
+            {
+                Print("FATAL: Parameter not recognized, bot will stop");
+                Stop();
+            }
+
+            if (InputOrderType2.ToLower() == "sell")
+            {
+                if (InputOrderPrice2 > MarketSeries.Close.LastValue)
+                    PlaceLimitOrder(TradeType.Sell, Symbol, InputOrderSize2, InputOrderPrice2, _label, InputStopLoss2, InputTakeProfit2);
+                else
+                    PlaceStopOrder(TradeType.Sell, Symbol, InputOrderSize2, InputOrderPrice2, _label, InputStopLoss2, InputTakeProfit2);
+            }
+            else if (InputOrderType2.ToLower() == "buy")
+            {
+                if (InputOrderPrice2 > MarketSeries.Close.LastValue)
+                    PlaceStopOrder(TradeType.Buy, Symbol, InputOrderSize2, InputOrderPrice2, _label, InputStopLoss2, InputTakeProfit2);
+                else
+                    PlaceLimitOrder(TradeType.Buy, Symbol, InputOrderSize2, InputOrderPrice2, _label, InputStopLoss2, InputTakeProfit2);
+            }
+            else
+            {
+                Print("FATAL: Parameter not recognized, bot will stop");
+                Stop();
+            }
+        }
+
+        private void PendingOrders_Filled(PendingOrderFilledEventArgs obj)
+        {
+            if (obj.PendingOrder.Label != _label)
+                return;
+
+            foreach (PendingOrder order in PendingOrders)
+            {
+                if (order.Label == _label)
+                {
+                    CancelPendingOrder(order);
+                }
+            }
+            Print("Bot: Cancelled other order");
+            Stop();
+        }
+
+        protected override void OnTick()
+        {
+
+        }
+
+        protected override void OnStop()
+        {
+            foreach (PendingOrder order in PendingOrders)
+            {
+                if (order.Label == _label)
+                {
+                    CancelPendingOrder(order);
+                }
+            }
+            Print("Bot: stopping");
+        }
+    }
+}
