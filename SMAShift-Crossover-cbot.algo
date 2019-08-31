@@ -1,0 +1,167 @@
+using System;
+using System.Linq;
+using cAlgo.API;
+using cAlgo.API.Indicators;
+using cAlgo.API.Internals;
+using cAlgo.Indicators;
+
+// Original Bot: https://ctrader.com/forum/calgo-support/15805
+// I Fixed: Use better indictor that works, Add control 'Groups', Remove account loss feature, Added multiple MATypes, Added debug statements.
+// https://raw.githubusercontent.com/camAtGitHub/cTrader-Stuff/master/SMAShift-Crossover-cbot.algo
+// Requires: SMAShift.algo. When building click 'Manage References', add 'SMAShift'
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class MAShiftCbot : Robot
+    {
+        [Parameter("Instance Name", DefaultValue = "001", Group = "Name / Volume")]
+        public string InstanceName { get; set; }
+
+        [Parameter("Lot Size", DefaultValue = 0.01, Group = "Name / Volume")]
+        public double lotsize { get; set; }
+
+        [Parameter("MA 1 Type", Group = "MA 1")]
+        public MovingAverageType MAType1 { get; set; }
+
+        [Parameter("MA 1 Source", Group = "MA 1")]
+        public DataSeries Source1 { get; set; }
+
+        [Parameter("MA 1 Periods", DefaultValue = 1, MinValue = 1, MaxValue = 100, Group = "MA 1")]
+        public int Period1 { get; set; }
+
+        [Parameter("MA 1 Shift", DefaultValue = 5, MinValue = -100, MaxValue = 500, Group = "MA 1")]
+        public int Shift1 { get; set; }
+
+        [Parameter("MA 2 Type", Group = "MA 2")]
+        public MovingAverageType MAType2 { get; set; }
+
+        [Parameter("MA 2 Source", Group = "MA 2")]
+        public DataSeries Source2 { get; set; }
+
+        [Parameter("MA 2 Periods", DefaultValue = 5, MinValue = 1, MaxValue = 100, Group = "MA 2")]
+        public int Period2 { get; set; }
+
+        [Parameter("MA 2 Shift", DefaultValue = 5, MinValue = -100, MaxValue = 500, Group = "MA 2")]
+        public int Shift2 { get; set; }
+
+//        [Parameter("Loss", DefaultValue = 50)]
+//        public double loss { get; set; }
+
+        [Parameter("TakeProfitPips", DefaultValue = 10, Group = "TP / SL")]
+        public int TP { get; set; }
+
+        [Parameter("StopLossPips", DefaultValue = 10, MinValue = 0, Group = "TP / SL")]
+        public int SL { get; set; }
+
+        [Parameter("trigger ", DefaultValue = 20, Group = "TP / SL")]
+        public int Trigger { get; set; }
+
+        [Parameter("Trailing", DefaultValue = 10, Group = "TP / SL")]
+        public int Trailing { get; set; }
+
+        private SMAShift _sma1 { get; set; }
+        private SMAShift _sma2 { get; set; }
+
+        protected override void OnStart()
+        {
+            _sma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
+            _sma2 = Indicators.GetIndicator<SMAShift>(MAType2, Source2, Period2, Shift2);
+        }
+        protected override void OnTick()
+        {
+            TRAILING();
+
+            if (_sma1.Result.Last(0) > _sma2.Result.Last(0))
+                //Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+                if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                {
+                    Print("IF1");
+                    Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+                    double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                    Print("ExecuteMarketOrder(TradeType.Buy)");
+                    ExecuteMarketOrder(TradeType.Buy, this.Symbol, volume, InstanceName, SL, TP, null, null);
+                    Print("ClosePosition(TradeType.Sell)");
+                    ClosePosition(TradeType.Sell);
+                }
+
+            if (_sma1.Result.Last(0) < _sma2.Result.Last(0))
+                //Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+
+                if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                {
+
+                    {
+                        Print("IF2");
+                        Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+                        double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                        Print("ExecuteMarketOrder(TradeType.Sell)");
+                        ExecuteMarketOrder(TradeType.Sell, this.Symbol, volume, InstanceName, SL, TP, null, null);
+                        Print("ClosePosition(TradeType.Buy)");
+                        ClosePosition(TradeType.Buy);
+                    }
+                }
+        }
+        private void ClosePosition(TradeType type)
+        {
+            var p = Positions.Find(InstanceName, this.Symbol, type);
+
+            if (p != null)
+            {
+                Print("ClosePosition()");
+                ClosePosition(p);
+            }
+//            if (Account.Balance <= loss)
+//                Stop();
+        }
+        private void TRAILING()
+        {
+            if (Trailing > 0 && Trigger > 0)
+            {
+
+                Position[] positions = Positions.FindAll(InstanceName, Symbol);
+
+                foreach (Position position in positions)
+                {
+
+                    if (position.TradeType == TradeType.Sell)
+                    {
+
+                        double distance = position.EntryPrice - Symbol.Ask;
+
+                        if (distance >= Trigger * Symbol.PipSize)
+                        {
+
+                            double newStopLossPrice = Symbol.Ask + Trailing * Symbol.PipSize;
+
+                            if (position.StopLoss == null || newStopLossPrice < position.StopLoss)
+                            {
+                                Print("StopLoss / ModifyPosition");
+                                ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+
+                            }
+                        }
+                    }
+
+                    else
+                    {
+
+                        double distance = Symbol.Bid - position.EntryPrice;
+
+                        if (distance >= Trigger * Symbol.PipSize)
+                        {
+
+                            double newStopLossPrice = Symbol.Bid - Trailing * Symbol.PipSize;
+
+                            if (position.StopLoss == null || newStopLossPrice > position.StopLoss)
+                            {
+                                Print("StopLoss / ModifyPosition2");
+                                ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
