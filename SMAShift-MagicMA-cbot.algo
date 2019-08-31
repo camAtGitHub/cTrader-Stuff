@@ -50,6 +50,18 @@ namespace cAlgo.Robots
         [Parameter("MA 1 Shift", DefaultValue = 6, MinValue = -100, MaxValue = 500, Group = "MA 1")]
         public int Shift1 { get; set; }
 
+        [Parameter("Range BO High", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
+        public double RBO_H { get; set; }
+
+        [Parameter("Range BO Low", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
+        public double RBO_L { get; set; }
+
+        [Parameter("Buy Orders Only", DefaultValue = false, Group = "OrderTypes")]
+        public bool buyOrderOnly { get; set; }
+
+        [Parameter("Sell Orders Only", DefaultValue = false, Group = "OrderTypes")]
+        public bool sellOrderOnly { get; set; }
+
         [Parameter("Print Debug", DefaultValue = true, Group = "Debug")]
         public bool IsDebug { get; set; }
 
@@ -71,6 +83,28 @@ namespace cAlgo.Robots
             {
                 Print("Using PC time for trading: " + _tradingTime.ToLongTimeString());
             }
+
+            // RBO mode?
+            if (RBO_H != 0 || RBO_L != 0)
+            {
+                Print("INFO: Range BreakOut Mode Enabled.");
+                if (RBO_H != 0)
+                {
+                    Print("INFO: Range BreakOut Mode Enabled. Only buying above: High: {0}", RBO_H);
+                }
+                if (RBO_L != 0)
+                {
+                    Print("INFO: Range BreakOut Mode Enabled. Only selling below: Low: {0}", RBO_L);
+                }
+            }
+            // Check for stupid config
+            if (buyOrderOnly && sellOrderOnly)
+            {
+                Print("FATAL: Buy and Sell Order Only both enabled. No trades can be made. Quitting.");
+                Stop();
+            }
+
+            // Init our MA indicator
             _ma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
         }
 
@@ -105,41 +139,52 @@ namespace cAlgo.Robots
                 Print("ShiftedMAPrice : {0}", shiftedMAPrice);
             }
 
-
-            //
-            // Use random person Order execution methods
-            //
-            if (candleClose > shiftedMAPrice)
-                if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+            if (!sellOrderOnly)
+            {
+                // Have we broken out of a range
+                if (candleClose > RBO_H || RBO_H == 0)
                 {
-                    if (IsDebug)
-                    {
-                        Print("IF1");
-                        Print("ExecuteMarketOrder(TradeType.Buy)");
-                        Print("ClosePosition(TradeType.Sell)");
-                    }
-
-                    double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                    ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
-                    ClosePosition(TradeType.Sell);
-                }
-
-            if (candleClose < shiftedMAPrice)
-                if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
-                {
-
-                    {
-                        if (IsDebug)
+                    if (candleClose > shiftedMAPrice)
+                        if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                         {
-                            Print("IF2");
-                            Print("ExecuteMarketOrder(TradeType.Sell)");
-                            Print("ClosePosition(TradeType.Buy)");
+                            if (IsDebug)
+                            {
+                                Print("IF1");
+                                Print("ExecuteMarketOrder(TradeType.Buy)");
+                                Print("ClosePosition(TradeType.Sell)");
+                            }
+
+                            double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                            ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
+                            ClosePosition(TradeType.Sell);
                         }
-                        double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                        ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
-                        ClosePosition(TradeType.Buy);
-                    }
                 }
+            }
+
+
+            if (!buyOrderOnly)
+            {
+                // Have we broken out of a range
+                if (candleClose < RBO_L || RBO_L == 0)
+                {
+                    if (candleClose < shiftedMAPrice)
+                        if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                        {
+
+                            {
+                                if (IsDebug)
+                                {
+                                    Print("IF2");
+                                    Print("ExecuteMarketOrder(TradeType.Sell)");
+                                    Print("ClosePosition(TradeType.Buy)");
+                                }
+                                double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                                ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
+                                ClosePosition(TradeType.Buy);
+                            }
+                        }
+                }
+            }
         }
 
         protected override void OnStop()
