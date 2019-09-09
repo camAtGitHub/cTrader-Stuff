@@ -32,10 +32,10 @@ namespace cAlgo.Robots
         [Parameter("StopLossPips", DefaultValue = 10, MinValue = 0, Group = "TP / SL")]
         public int SL { get; set; }
 
-        [Parameter("trigger ", DefaultValue = 20, Group = "TP / SL")]
+        [Parameter("Trail Trigger ", DefaultValue = 20, Group = "TP / SL")]
         public int Trigger { get; set; }
 
-        [Parameter("Trailing", DefaultValue = 10, Group = "TP / SL")]
+        [Parameter("Trail Distance", DefaultValue = 10, Group = "TP / SL")]
         public int Trailing { get; set; }
 
         [Parameter("MA 1 Type", Group = "MA 1")]
@@ -49,10 +49,10 @@ namespace cAlgo.Robots
 
         [Parameter("MA 1 Shift", DefaultValue = 6, MinValue = -100, MaxValue = 500, Group = "MA 1")]
         public int Shift1 { get; set; }
-
+        // Range Break Out (BO)
         [Parameter("Range BO High", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
         public double RBO_H { get; set; }
-
+        // Range Break Out (BO)
         [Parameter("Range BO Low", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
         public double RBO_L { get; set; }
 
@@ -146,7 +146,7 @@ namespace cAlgo.Robots
 
         protected override void OnBar()
         {
-            TRAILING();
+            //TRAILING();
 
             debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
 
@@ -160,14 +160,20 @@ namespace cAlgo.Robots
             debug("PreviousBar Close: {0}", candleClose);
             debug("ShiftedMAPrice : {0}", shiftedMAPrice);
 
-            // if buySellLogic is false, we were previously in sell/ShortZone
-            if (!buySellLogic || aggressiveReenter)
+
+            if (candleClose > shiftedMAPrice)
+            {
+                if (Positions.Count(x => x.TradeType == TradeType.Sell) != 0)
+                {
+                    ClosePosition(TradeType.Sell);
+                }
                 if (!sellOrderOnly)
                 {
                     // Have we broken out of a range
                     if (candleClose > RBO_H || RBO_H == 0)
                     {
-                        if (candleClose > shiftedMAPrice)
+                        // if buySellLogic is false, we were previously in sell/ShortZone
+                        if (!buySellLogic || aggressiveReenter)
                             if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                             {
                                 debug("IF1");
@@ -175,23 +181,29 @@ namespace cAlgo.Robots
                                 debug("ClosePosition(TradeType.Sell)");
                                 double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                 ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
-                                ClosePosition(TradeType.Sell);
                                 buySellLogic = true;
                             }
                     }
                 }
+            }
 
-            // if buySellLogic is true, we were previously in buy/LongZone
-            if (buySellLogic || aggressiveReenter)
+
+            if (candleClose < shiftedMAPrice)
+            {
+                if (Positions.Count(x => x.TradeType == TradeType.Buy) != 0)
+                {
+                    ClosePosition(TradeType.Buy);
+                }
+
                 if (!buyOrderOnly)
                 {
                     // Have we broken out of a range
                     if (candleClose < RBO_L || RBO_L == 0)
                     {
-                        if (candleClose < shiftedMAPrice)
+                        // if buySellLogic is true, we were previously in buy/LongZone
+                        if (buySellLogic || aggressiveReenter)
                             if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
                             {
-
                                 {
                                     debug("IF2");
                                     debug("ExecuteMarketOrder(TradeType.Sell)");
@@ -199,12 +211,12 @@ namespace cAlgo.Robots
 
                                     double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                     ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
-                                    ClosePosition(TradeType.Buy);
                                     buySellLogic = false;
                                 }
                             }
                     }
                 }
+            }
         }
 
         protected override void OnStop()
