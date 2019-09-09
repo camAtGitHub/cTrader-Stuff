@@ -110,21 +110,15 @@ namespace cAlgo.Robots
 
         protected override void OnTick()
         {
-            //TRAILING();
-            if (IsDebug)
-            {
-                Print("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
-            }
+            TRAILING();
+            //debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
         }
 
         protected override void OnBar()
         {
             TRAILING();
-            if (IsDebug)
-            {
-                Print("OnBar()");
-                Print("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
-            }
+
+            debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
 
             // Configure Price
             // -2 Closed Bar / -1 Current Bar
@@ -133,11 +127,8 @@ namespace cAlgo.Robots
             // Set MA to var
             shiftedMAPrice = _ma1.Result.Last(Shift1);
 
-            if (IsDebug)
-            {
-                Print("PreviousBar Close: {0}", candleClose);
-                Print("ShiftedMAPrice : {0}", shiftedMAPrice);
-            }
+            debug("PreviousBar Close: {0}", candleClose);
+            debug("ShiftedMAPrice : {0}", shiftedMAPrice);
 
             if (!sellOrderOnly)
             {
@@ -147,13 +138,9 @@ namespace cAlgo.Robots
                     if (candleClose > shiftedMAPrice)
                         if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                         {
-                            if (IsDebug)
-                            {
-                                Print("IF1");
-                                Print("ExecuteMarketOrder(TradeType.Buy)");
-                                Print("ClosePosition(TradeType.Sell)");
-                            }
-
+                            debug("IF1");
+                            debug("ExecuteMarketOrder(TradeType.Buy)");
+                            debug("ClosePosition(TradeType.Sell)");
                             double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                             ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
                             ClosePosition(TradeType.Sell);
@@ -172,12 +159,10 @@ namespace cAlgo.Robots
                         {
 
                             {
-                                if (IsDebug)
-                                {
-                                    Print("IF2");
-                                    Print("ExecuteMarketOrder(TradeType.Sell)");
-                                    Print("ClosePosition(TradeType.Buy)");
-                                }
+                                debug("IF2");
+                                debug("ExecuteMarketOrder(TradeType.Sell)");
+                                debug("ClosePosition(TradeType.Buy)");
+
                                 double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                 ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
                                 ClosePosition(TradeType.Buy);
@@ -211,12 +196,32 @@ namespace cAlgo.Robots
             if (p != null)
             {
                 ClosePosition(p);
-                if (IsDebug)
-                {
-                    Print("ClosePosition()");
-                }
+                debug("ClosePosition()");
             }
         }
+
+        private void debug(string myMessage)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage);
+            }
+        }
+        private void debug(string myMessage, double myMessage2)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2);
+            }
+        }
+        private void debug(string myMessage, double myMessage2, double myMessage3)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2, myMessage3);
+            }
+        }
+
 
         private void TRAILING()
         {
