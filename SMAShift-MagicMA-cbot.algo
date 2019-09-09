@@ -62,6 +62,11 @@ namespace cAlgo.Robots
         [Parameter("Sell Orders Only", DefaultValue = false, Group = "OrderTypes")]
         public bool sellOrderOnly { get; set; }
 
+        // If this setting is enabled and you have no positions open
+        // then the robot will place a trade on the next onBar(). Might result in poor entries.
+        [Parameter("Aggressive re-entry", DefaultValue = false, Group = "OrderTypes")]
+        public bool aggressiveReenter { get; set; }
+
         [Parameter("Print Debug", DefaultValue = true, Group = "Debug")]
         public bool IsDebug { get; set; }
 
@@ -103,6 +108,11 @@ namespace cAlgo.Robots
             {
                 Print("FATAL: Buy and Sell Order Only both enabled. No trades can be made. Quitting.");
                 Stop();
+            }
+
+            if (aggressiveReenter)
+            {
+                Print("INFO: Aggressive re-entry is ENABLED. Trades will opened on next bar and everytime SL or TP is hit");
             }
 
             // Init our MA indicator
@@ -151,7 +161,7 @@ namespace cAlgo.Robots
             debug("ShiftedMAPrice : {0}", shiftedMAPrice);
 
             // if buySellLogic is false, we were previously in sell/ShortZone
-            if (!buySellLogic)
+            if (!buySellLogic || aggressiveReenter)
                 if (!sellOrderOnly)
                 {
                     // Have we broken out of a range
@@ -172,7 +182,7 @@ namespace cAlgo.Robots
                 }
 
             // if buySellLogic is true, we were previously in buy/LongZone
-            if (buySellLogic)
+            if (buySellLogic || aggressiveReenter)
                 if (!buyOrderOnly)
                 {
                     // Have we broken out of a range
