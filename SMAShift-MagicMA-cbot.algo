@@ -369,12 +369,8 @@ namespace cAlgo.Robots
             var sqrtWins = Math.Sqrt(args.WinningTrades);
             var sqrtLosses = Math.Sqrt(args.LosingTrades);
 
-            return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades + sqrtLosses))) / AccountSize) * 100;
-
-
+            return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades - sqrtLosses))) / AccountSize) * 100;
         }
-
-
 
         // END - Play around with getFitness
 
