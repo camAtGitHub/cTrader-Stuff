@@ -141,6 +141,7 @@ namespace cAlgo.Robots
         protected override void OnTick()
         {
             TRAILING();
+
             //debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
         }
 
@@ -307,6 +308,75 @@ namespace cAlgo.Robots
                 }
             }
         }
+
+        // START - Play around with getFitness
+        protected override double GetFitness(GetFitnessArgs args)
+        {
+            //return _fit_winLossRatio(args);
+            //return _fit_MaxWinTrade_MinLosses(args);
+            //return _fit_MaxWinTrade_MinLosses2(args);
+            return _fit_PessimisticReturnOnMargin(args);
+        }
+
+        private double _fit_winLossRatio(GetFitnessArgs args)
+        {
+            return args.WinningTrades / (args.WinningTrades + args.LosingTrades + 1);
+        }
+        //maximize count of winning trades and minimize count of losing trades
+        private double _fit_MaxWinTrade_MinLosses(GetFitnessArgs args)
+        {
+            return (args.NetProfit * args.WinningTrades * TP) / (args.MaxEquityDrawdownPercentages * SL);
+        }
+        private double _fit_MaxWinTrade_MinLosses2(GetFitnessArgs args)
+        {
+            return (Math.Pow(args.NetProfit, 3) * Math.Pow(args.WinningTrades, 2) * (TP / SL)) / (Math.Pow(args.MaxEquityDrawdownPercentages, 2) * TP * SL * args.MaxEquityDrawdown);
+        }
+        private double _fit_PessimisticReturnOnMargin(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades + sqrtLosses))) / AccountSize) * 100;
+
+
+        }
+
+
+
+        // END - Play around with getFitness
 
     }
 }
