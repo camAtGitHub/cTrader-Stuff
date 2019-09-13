@@ -72,7 +72,7 @@ namespace cAlgo.Robots
 
         private SMAShift _ma1 { get; set; }
 
-        public double candleClose;
+        public double candleOpen;
         public double shiftedMAPrice;
         public bool buySellLogic;
         // true = foo, false = sell 
@@ -119,11 +119,11 @@ namespace cAlgo.Robots
             _ma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
 
             // Work Out Buy/Sell once per cross-over logic
-            int index = MarketSeries.Close.Count - 2;
-            candleClose = MarketSeries.Close[index];
+            int index = MarketSeries.Open.Count - 1;
+            candleOpen = MarketSeries.Open[index];
             // Set MA to var
             shiftedMAPrice = _ma1.Result.Last(Shift1);
-            if (candleClose > shiftedMAPrice)
+            if (candleOpen > shiftedMAPrice)
             {
                 debug("DEBUG: Last close above MA. We are in long zone");
                 // true = buy/LongZone
@@ -153,16 +153,16 @@ namespace cAlgo.Robots
 
             // Configure Price
             // -2 Closed Bar / -1 Current Bar
-            int index = MarketSeries.Close.Count - 2;
-            candleClose = MarketSeries.Close[index];
+            int index = MarketSeries.Open.Count - 1;
+            candleOpen = MarketSeries.Open[index];
             // Set MA to var
             shiftedMAPrice = _ma1.Result.Last(Shift1);
 
-            debug("PreviousBar Close: {0}", candleClose);
+            debug("candleOpen: {0}", candleOpen);
             debug("ShiftedMAPrice : {0}", shiftedMAPrice);
 
 
-            if (candleClose > shiftedMAPrice)
+            if (candleOpen > shiftedMAPrice)
             {
                 if (Positions.Count(x => x.TradeType == TradeType.Sell) != 0)
                 {
@@ -177,7 +177,7 @@ namespace cAlgo.Robots
                         if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                         {
                             // Have we broken out of a range
-                            if (candleClose > RBO_H || RBO_H == 0)
+                            if (candleOpen > RBO_H || RBO_H == 0)
                             {
                                 debug("IF1");
                                 debug("ExecuteMarketOrder(TradeType.Buy)");
@@ -191,7 +191,7 @@ namespace cAlgo.Robots
             }
 
 
-            if (candleClose < shiftedMAPrice)
+            if (candleOpen < shiftedMAPrice)
             {
                 if (Positions.Count(x => x.TradeType == TradeType.Buy) != 0)
                 {
@@ -206,7 +206,7 @@ namespace cAlgo.Robots
                         if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
                         {
                             // Have we broken out of a range
-                            if (candleClose < RBO_L || RBO_L == 0)
+                            if (candleOpen < RBO_L || RBO_L == 0)
                             {
                                 {
                                     debug("IF2");
