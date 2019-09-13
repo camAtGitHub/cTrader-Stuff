@@ -170,20 +170,22 @@ namespace cAlgo.Robots
                 }
                 if (!sellOrderOnly)
                 {
-                    // Have we broken out of a range
-                    if (candleClose > RBO_H || RBO_H == 0)
+                    // if buySellLogic is false, we were previously in sell/ShortZone
+                    if (!buySellLogic || aggressiveReenter)
                     {
-                        // if buySellLogic is false, we were previously in sell/ShortZone
-                        if (!buySellLogic || aggressiveReenter)
-                            if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                        buySellLogic = true;
+                        if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                        {
+                            // Have we broken out of a range
+                            if (candleClose > RBO_H || RBO_H == 0)
                             {
                                 debug("IF1");
                                 debug("ExecuteMarketOrder(TradeType.Buy)");
                                 debug("ClosePosition(TradeType.Sell)");
                                 double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                 ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
-                                buySellLogic = true;
                             }
+                        }
                     }
                 }
             }
@@ -195,26 +197,26 @@ namespace cAlgo.Robots
                 {
                     ClosePosition(TradeType.Buy);
                 }
-
                 if (!buyOrderOnly)
                 {
-                    // Have we broken out of a range
-                    if (candleClose < RBO_L || RBO_L == 0)
+                    // if buySellLogic is true, we were previously in buy/LongZone
+                    if (buySellLogic || aggressiveReenter)
                     {
-                        // if buySellLogic is true, we were previously in buy/LongZone
-                        if (buySellLogic || aggressiveReenter)
-                            if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                        buySellLogic = false;
+                        if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                        {
+                            // Have we broken out of a range
+                            if (candleClose < RBO_L || RBO_L == 0)
                             {
                                 {
                                     debug("IF2");
                                     debug("ExecuteMarketOrder(TradeType.Sell)");
                                     debug("ClosePosition(TradeType.Buy)");
-
                                     double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                     ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
-                                    buySellLogic = false;
                                 }
                             }
+                        }
                     }
                 }
             }
@@ -315,7 +317,8 @@ namespace cAlgo.Robots
             //return _fit_winLossRatio(args);
             //return _fit_MaxWinTrade_MinLosses(args);
             //return _fit_MaxWinTrade_MinLosses2(args);
-            return _fit_PessimisticReturnOnMargin(args);
+            //return _fit_PessimisticReturnOnMargin(args);
+            return _fit_PessimisticReturnOnMarginDrawDown(args);
         }
 
         private double _fit_winLossRatio(GetFitnessArgs args)
@@ -370,6 +373,47 @@ namespace cAlgo.Robots
             var sqrtLosses = Math.Sqrt(args.LosingTrades);
 
             return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades - sqrtLosses))) / AccountSize) * 100;
+        }
+        // Add some sort of weighting to drawdown - not sure how mathmatically correct it is
+        private double _fit_PessimisticReturnOnMarginDrawDown(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return ((((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades + sqrtLosses))) / AccountSize) * 10000) / Math.Sqrt(args.MaxEquityDrawdownPercentages);
         }
 
         // END - Play around with getFitness
