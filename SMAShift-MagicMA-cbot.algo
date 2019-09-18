@@ -44,7 +44,7 @@ namespace cAlgo.Robots
         [Parameter("MA 1 Source", Group = "MA 1")]
         public DataSeries Source1 { get; set; }
 
-        [Parameter("MA 1 Periods", DefaultValue = 1, MinValue = 1, MaxValue = 100, Group = "MA 1")]
+        [Parameter("MA 1 Periods", DefaultValue = 1, MinValue = 1, MaxValue = 300, Group = "MA 1")]
         public int Period1 { get; set; }
 
         [Parameter("MA 1 Shift", DefaultValue = 6, MinValue = -100, MaxValue = 500, Group = "MA 1")]
@@ -181,13 +181,18 @@ namespace cAlgo.Robots
                             {
                                 debug("IF1");
                                 debug("ExecuteMarketOrder(TradeType.Buy)");
-                                debug("ClosePosition(TradeType.Sell)");
                                 double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                 ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
                             }
                         }
                     }
                 }
+                else
+                {
+                    // Still need to reset logic
+                    buySellLogic = true;
+                }
+
             }
 
 
@@ -211,13 +216,17 @@ namespace cAlgo.Robots
                                 {
                                     debug("IF2");
                                     debug("ExecuteMarketOrder(TradeType.Sell)");
-                                    debug("ClosePosition(TradeType.Buy)");
                                     double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                     ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
                                 }
                             }
                         }
                     }
+                }
+                else
+                {
+                    // Still need to reset logic
+                    buySellLogic = false;
                 }
             }
         }
@@ -245,8 +254,9 @@ namespace cAlgo.Robots
 
             if (p != null)
             {
-                ClosePosition(p);
-                debug("ClosePosition()");
+                debug("DEBUG: ClosePosition()");
+                foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, type))
+                    ClosePosition(position);
             }
         }
 
