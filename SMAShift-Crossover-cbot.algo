@@ -85,7 +85,7 @@ namespace cAlgo.Robots
         private SMAShift _sma2 { get; set; }
 
         public double candleOpen;
-        public bool buySellOnlyLogic;
+        public bool buySellZoneLogic;
 
         protected override void OnStart()
         {
@@ -164,13 +164,13 @@ namespace cAlgo.Robots
             {
                 debug("DEBUG: MA1 above MA2. We are in long zone");
                 // true = buy/LongZone
-                buySellOnlyLogic = true;
+                buySellZoneLogic = true;
             }
             else
             {
                 debug("DEBUG: MA1 below MA2. We are in short zone");
                 // false = sell/ShortZone
-                buySellOnlyLogic = false;
+                buySellZoneLogic = false;
             }
         }
 
@@ -201,10 +201,10 @@ namespace cAlgo.Robots
 
                 if (!sellOrderOnly)
                 {
-                    // if buySellOnlyLogic is false, we were previously in sell/ShortZone
-                    if (!buySellOnlyLogic || aggressiveReenter)
+                    // if buySellZoneLogic is false, we were previously in sell/ShortZone
+                    if (!buySellZoneLogic || aggressiveReenter)
                     {
-                        buySellOnlyLogic = true;
+                        buySellZoneLogic = true;
                         if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                         {
                             // Have we broken out of a range
@@ -223,7 +223,7 @@ namespace cAlgo.Robots
                 else
                 {
                     // Still need to reset the logic
-                    buySellOnlyLogic = true;
+                    buySellZoneLogic = true;
                 }
             }
 
@@ -238,10 +238,10 @@ namespace cAlgo.Robots
                 }
                 if (!buyOrderOnly)
                 {
-                    // if buySellOnlyLogic is true, we were previously in buy/LongZone
-                    if (buySellOnlyLogic || aggressiveReenter)
+                    // if buySellZoneLogic is true, we were previously in buy/LongZone
+                    if (buySellZoneLogic || aggressiveReenter)
                     {
-                        buySellOnlyLogic = false;
+                        buySellZoneLogic = false;
                         if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
                         {
                             // Have we broken out of a range
@@ -260,7 +260,7 @@ namespace cAlgo.Robots
                 else
                 {
                     // Still need to reset the logic
-                    buySellOnlyLogic = false;
+                    buySellZoneLogic = false;
                 }
             }
         }
@@ -465,8 +465,6 @@ namespace cAlgo.Robots
         }
 
         // END - Play around with getFitness       
-
-
 
     }
 }
