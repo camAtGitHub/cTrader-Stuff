@@ -69,6 +69,11 @@ namespace cAlgo.Robots
         [Parameter("Sell Orders Only", DefaultValue = false, Group = "OrderTypes")]
         public bool sellOrderOnly { get; set; }
 
+        // If this setting is enabled and you have no positions open
+        // then the robot will place a trade on the next onBar(). Might result in poor entries.
+        [Parameter("Aggressive re-entry", DefaultValue = false, Group = "OrderTypes")]
+        public bool aggressiveReenter { get; set; }
+
         [Parameter("Print Debug", DefaultValue = true, Group = "Debug")]
         public bool IsDebug { get; set; }
 
@@ -76,6 +81,9 @@ namespace cAlgo.Robots
 
         private SMAShift _sma1 { get; set; }
         private SMAShift _sma2 { get; set; }
+
+        public double candleOpen;
+        public bool buySellLogic;
 
         protected override void OnStart()
         {
@@ -95,7 +103,7 @@ namespace cAlgo.Robots
             // Check for silly config
             if (Period1 >= Period2)
             {
-                Print("Fatal: MA 1 Period must be LESS than MA 2 Period. Stopping Robot");
+                Print("FATAL: MA 1 Period must be LESS than MA 2 Period. Stopping Robot");
                 Stop();
             }
 
@@ -119,9 +127,31 @@ namespace cAlgo.Robots
                 Stop();
             }
 
+            // Initalize our SMAs
             _sma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
             _sma2 = Indicators.GetIndicator<SMAShift>(MAType2, Source2, Period2, Shift2);
+
+
+            // Work Out Buy/Sell once per cross-over logic
+            int index = MarketSeries.Open.Count - 1;
+            candleOpen = MarketSeries.Open[index];
+
+            // Set wait for CrossOver Logic
+            if (_sma1.Result.Last(0) >= _sma1.Result.Last(0))
+            {
+                debug("DEBUG: MA1 above MA2. We are in long zone");
+                // true = buy/LongZone
+                buySellLogic = true;
+            }
+            else
+            {
+                debug("DEBUG: MA1 below MA2. We are in short zone");
+                // false = sell/ShortZone
+                buySellLogic = false;
+            }
         }
+
+
         protected override void OnTick()
         {
             TRAILING();
@@ -135,28 +165,62 @@ namespace cAlgo.Robots
 
             if (_sma1.Result.Last(0) > _sma2.Result.Last(0))
             {
-                if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                if (Positions.Count(x => x.TradeType == TradeType.Sell) != 0)
                 {
-                    debug("DEBUG: IF1");
-                    double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                    debug("DEBUG: ExecuteMarketOrder(TradeType.Buy)");
-                    ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
-                    debug("DEBUG: ClosePosition(TradeType.Sell)");
                     ClosePosition(TradeType.Sell);
+                }
+
+                if (!sellOrderOnly)
+                {
+                    // if buySellLogic is false, we were previously in sell/ShortZone
+                    if (!buySellLogic || aggressiveReenter)
+                    {
+                        buySellLogic = true;
+                        if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                        {
+                            // Have we broken out of a range
+                            if (candleOpen > RBO_H || RBO_H == 0)
+                            {
+                                debug("DEBUG: IF1");
+                                double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                                debug("DEBUG: ExecuteMarketOrder(TradeType.Buy)");
+                                ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
+                                debug("DEBUG: ClosePosition(TradeType.Sell)");
+                                ClosePosition(TradeType.Sell);
+                            }
+                        }
+                    }
                 }
             }
 
+
+
+
             if (_sma1.Result.Last(0) < _sma2.Result.Last(0))
             {
-                if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                if (Positions.Count(x => x.TradeType == TradeType.Buy) != 0)
                 {
+                    ClosePosition(TradeType.Buy);
+                }
+                if (!buyOrderOnly)
+                {
+                    // if buySellLogic is true, we were previously in buy/LongZone
+                    if (buySellLogic || aggressiveReenter)
                     {
-                        debug("DEBUG: IF2");
-                        double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                        debug("DEBUG: ExecuteMarketOrder(TradeType.Sell)");
-                        ExecuteMarketOrder(TradeType.Sell, this.SymbolName, volume, InstanceName, SL, TP);
-                        debug("DEBUG: ClosePosition(TradeType.Buy)");
-                        ClosePosition(TradeType.Buy);
+                        buySellLogic = false;
+                        if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                        {
+                            // Have we broken out of a range
+                            if (candleOpen < RBO_L || RBO_L == 0)
+                            {
+                                debug("DEBUG: IF2");
+                                double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                                debug("DEBUG: ExecuteMarketOrder(TradeType.Sell)");
+                                ExecuteMarketOrder(TradeType.Sell, this.SymbolName, volume, InstanceName, SL, TP);
+                                debug("DEBUG: ClosePosition(TradeType.Buy)");
+                                ClosePosition(TradeType.Buy);
+                            }
+                        }
                     }
                 }
             }
