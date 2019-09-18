@@ -6,7 +6,7 @@ using cAlgo.API.Internals;
 using cAlgo.Indicators;
 
 // Original Bot: https://ctrader.com/forum/calgo-support/15805
-// I Fixed: Use better indictor that works, Add control 'Groups', Remove account loss feature, Added multiple MATypes, Added debug statements.
+// I Fixed: Use better indicator that works, Add control 'Groups', Remove account loss feature, Added multiple MATypes, Added debug statements.
 // https://raw.githubusercontent.com/camAtGitHub/cTrader-Stuff/master/SMAShift-Crossover-cbot.algo
 
 namespace cAlgo.Robots
@@ -26,10 +26,10 @@ namespace cAlgo.Robots
         [Parameter("MA 1 Source", Group = "MA 1")]
         public DataSeries Source1 { get; set; }
 
-        [Parameter("MA 1 Periods", DefaultValue = 1, MinValue = 1, MaxValue = 100, Group = "MA 1")]
+        [Parameter("MA 1 Periods", DefaultValue = 10, MinValue = 1, MaxValue = 400, Group = "MA 1")]
         public int Period1 { get; set; }
 
-        [Parameter("MA 1 Shift", DefaultValue = 5, MinValue = -100, MaxValue = 500, Group = "MA 1")]
+        [Parameter("MA 1 Shift", DefaultValue = 0, MinValue = -500, MaxValue = 500, Group = "MA 1")]
         public int Shift1 { get; set; }
 
         [Parameter("MA 2 Type", Group = "MA 2")]
@@ -38,14 +38,11 @@ namespace cAlgo.Robots
         [Parameter("MA 2 Source", Group = "MA 2")]
         public DataSeries Source2 { get; set; }
 
-        [Parameter("MA 2 Periods", DefaultValue = 5, MinValue = 1, MaxValue = 100, Group = "MA 2")]
+        [Parameter("MA 2 Periods", DefaultValue = 20, MinValue = 1, MaxValue = 400, Group = "MA 2")]
         public int Period2 { get; set; }
 
-        [Parameter("MA 2 Shift", DefaultValue = 5, MinValue = -100, MaxValue = 500, Group = "MA 2")]
+        [Parameter("MA 2 Shift", DefaultValue = 0, MinValue = -500, MaxValue = 500, Group = "MA 2")]
         public int Shift2 { get; set; }
-
-//        [Parameter("Loss", DefaultValue = 50)]
-//        public double loss { get; set; }
 
         [Parameter("TakeProfitPips", DefaultValue = 10, Group = "TP / SL")]
         public int TP { get; set; }
@@ -59,108 +56,314 @@ namespace cAlgo.Robots
         [Parameter("Trailing", DefaultValue = 10, Group = "TP / SL")]
         public int Trailing { get; set; }
 
+        // Range Break Out (BO)
+        [Parameter("Range BO High", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
+        public double RBO_H { get; set; }
+        // Range Break Out (BO)
+        [Parameter("Range BO Low", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
+        public double RBO_L { get; set; }
+
+        [Parameter("Buy Orders Only", DefaultValue = false, Group = "OrderTypes")]
+        public bool buyOrderOnly { get; set; }
+
+        [Parameter("Sell Orders Only", DefaultValue = false, Group = "OrderTypes")]
+        public bool sellOrderOnly { get; set; }
+
+        [Parameter("Print Debug", DefaultValue = true, Group = "Debug")]
+        public bool IsDebug { get; set; }
+
+        private DateTime _tradingTime { get; set; }
+
         private SMAShift _sma1 { get; set; }
         private SMAShift _sma2 { get; set; }
 
         protected override void OnStart()
         {
+
+            Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
+
+            _tradingTime = TradingDateTime();
+            if (this.IsBacktesting)
+            {
+                Print("Using server time for trading (UTC+0): " + _tradingTime.ToLongTimeString());
+            }
+            else
+            {
+                Print("Using PC time for trading: " + _tradingTime.ToLongTimeString());
+            }
+
+            // Check for silly config
+            if (Period1 >= Period2)
+            {
+                Print("Fatal: MA 1 Period must be LESS than MA 2 Period. Stopping Robot");
+                Stop();
+            }
+
+            // RBO mode?
+            if (RBO_H != 0 || RBO_L != 0)
+            {
+                Print("INFO: Range BreakOut Mode Enabled.");
+                if (RBO_H != 0)
+                {
+                    Print("INFO: Range BreakOut Mode Enabled. Only buying above: High: {0}", RBO_H);
+                }
+                if (RBO_L != 0)
+                {
+                    Print("INFO: Range BreakOut Mode Enabled. Only selling below: Low: {0}", RBO_L);
+                }
+            }
+            // Check for stupid config
+            if (buyOrderOnly && sellOrderOnly)
+            {
+                Print("FATAL: Buy and Sell Order Only both enabled. No trades can be made. Quitting.");
+                Stop();
+            }
+
             _sma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
             _sma2 = Indicators.GetIndicator<SMAShift>(MAType2, Source2, Period2, Shift2);
         }
         protected override void OnTick()
         {
             TRAILING();
+        }
+
+
+
+        protected override void OnBar()
+        {
+            debug("DEBUG: SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
 
             if (_sma1.Result.Last(0) > _sma2.Result.Last(0))
-                //Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+            {
                 if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                 {
-                    Print("IF1");
-                    Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+                    debug("DEBUG: IF1");
                     double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                    Print("ExecuteMarketOrder(TradeType.Buy)");
-                    ExecuteMarketOrder(TradeType.Buy, this.Symbol, volume, InstanceName, SL, TP, null, null);
-                    Print("ClosePosition(TradeType.Sell)");
+                    debug("DEBUG: ExecuteMarketOrder(TradeType.Buy)");
+                    ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
+                    debug("DEBUG: ClosePosition(TradeType.Sell)");
                     ClosePosition(TradeType.Sell);
                 }
+            }
 
             if (_sma1.Result.Last(0) < _sma2.Result.Last(0))
-                //Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
-
+            {
                 if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
                 {
-
                     {
-                        Print("IF2");
-                        Print("SMA1:{0}  SMA2:{1}", _sma1.Result.Last(0), _sma2.Result.Last(0));
+                        debug("DEBUG: IF2");
                         double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                        Print("ExecuteMarketOrder(TradeType.Sell)");
-                        ExecuteMarketOrder(TradeType.Sell, this.Symbol, volume, InstanceName, SL, TP, null, null);
-                        Print("ClosePosition(TradeType.Buy)");
+                        debug("DEBUG: ExecuteMarketOrder(TradeType.Sell)");
+                        ExecuteMarketOrder(TradeType.Sell, this.SymbolName, volume, InstanceName, SL, TP);
+                        debug("DEBUG: ClosePosition(TradeType.Buy)");
                         ClosePosition(TradeType.Buy);
                     }
                 }
+            }
         }
+
+
         private void ClosePosition(TradeType type)
         {
-            var p = Positions.Find(InstanceName, this.Symbol, type);
-
+            var p = Positions.Find(InstanceName, this.SymbolName, type);
             if (p != null)
             {
-                Print("ClosePosition()");
-                ClosePosition(p);
+                debug("DEBUG: ClosePosition()");
+                foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, type))
+                    ClosePosition(position);
             }
-//            if (Account.Balance <= loss)
-//                Stop();
         }
+
+
         private void TRAILING()
         {
             if (Trailing > 0 && Trigger > 0)
             {
-
-                Position[] positions = Positions.FindAll(InstanceName, Symbol);
-
-                foreach (Position position in positions)
+                var p = Positions.Find(InstanceName, this.SymbolName);
+                if (p != null)
                 {
-
-                    if (position.TradeType == TradeType.Sell)
+                    Position[] positions = Positions.FindAll(InstanceName, SymbolName);
+                    foreach (Position position in positions)
                     {
-
-                        double distance = position.EntryPrice - Symbol.Ask;
-
-                        if (distance >= Trigger * Symbol.PipSize)
+                        if (position.TradeType == TradeType.Sell)
                         {
-
-                            double newStopLossPrice = Symbol.Ask + Trailing * Symbol.PipSize;
-
-                            if (position.StopLoss == null || newStopLossPrice < position.StopLoss)
+                            double distance = position.EntryPrice - Symbol.Ask;
+                            if (distance >= Trigger * Symbol.PipSize)
                             {
-                                Print("StopLoss / ModifyPosition");
-                                ModifyPosition(position, newStopLossPrice, position.TakeProfit);
-
+                                double newStopLossPrice = Symbol.Ask + Trailing * Symbol.PipSize;
+                                if (position.StopLoss == null || newStopLossPrice < position.StopLoss)
+                                {
+                                    //Print("StopLoss / ModifyPosition");
+                                    ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                                }
                             }
                         }
-                    }
 
-                    else
-                    {
-
-                        double distance = Symbol.Bid - position.EntryPrice;
-
-                        if (distance >= Trigger * Symbol.PipSize)
+                        else
                         {
-
-                            double newStopLossPrice = Symbol.Bid - Trailing * Symbol.PipSize;
-
-                            if (position.StopLoss == null || newStopLossPrice > position.StopLoss)
+                            double distance = Symbol.Bid - position.EntryPrice;
+                            if (distance >= Trigger * Symbol.PipSize)
                             {
-                                Print("StopLoss / ModifyPosition2");
-                                ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                                double newStopLossPrice = Symbol.Bid - Trailing * Symbol.PipSize;
+                                if (position.StopLoss == null || newStopLossPrice > position.StopLoss)
+                                {
+                                    //Print("StopLoss / ModifyPosition2");
+                                    ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+
+
+
+        private void debug(string myMessage)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage);
+            }
+        }
+        private void debug(string myMessage, double myMessage2)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2);
+            }
+        }
+        private void debug(string myMessage, double myMessage2, double myMessage3)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2, myMessage3);
+            }
+        }
+
+        public DateTime TradingDateTime()
+        {
+            if (this.IsBacktesting)
+            {
+                return Server.Time;
+            }
+            else
+            {
+                return TimeZoneInfo.ConvertTime(DateTime.Now, TimeZoneInfo.Local);
+            }
+        }
+
+
+
+        // START - Play around with getFitness
+        protected override double GetFitness(GetFitnessArgs args)
+        {
+            //return _fit_winLossRatio(args);
+            //return _fit_MaxWinTrade_MinLosses(args);
+            //return _fit_MaxWinTrade_MinLosses2(args);
+            //return _fit_PessimisticReturnOnMargin(args);
+            return _fit_PessimisticReturnOnMarginDrawDown(args);
+        }
+
+        private double _fit_winLossRatio(GetFitnessArgs args)
+        {
+            return args.WinningTrades / (args.WinningTrades + args.LosingTrades + 1);
+        }
+        //maximize count of winning trades and minimize count of losing trades
+        private double _fit_MaxWinTrade_MinLosses(GetFitnessArgs args)
+        {
+            return (args.NetProfit * args.WinningTrades * TP) / (args.MaxEquityDrawdownPercentages * SL);
+        }
+        private double _fit_MaxWinTrade_MinLosses2(GetFitnessArgs args)
+        {
+            return (Math.Pow(args.NetProfit, 3) * Math.Pow(args.WinningTrades, 2) * (TP / SL)) / (Math.Pow(args.MaxEquityDrawdownPercentages, 2) * TP * SL * args.MaxEquityDrawdown);
+        }
+        private double _fit_PessimisticReturnOnMargin(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades - sqrtLosses))) / AccountSize) * 100;
+        }
+        // Add some sort of weighting to drawdown - not sure how mathmatically correct it is
+        private double _fit_PessimisticReturnOnMarginDrawDown(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return ((((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades + sqrtLosses))) / AccountSize) * 10000) / Math.Sqrt(args.MaxEquityDrawdownPercentages);
+        }
+
+        // END - Play around with getFitness       
+
+
+
     }
 }
