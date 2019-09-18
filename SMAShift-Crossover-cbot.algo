@@ -8,7 +8,6 @@ using cAlgo.Indicators;
 // Original Bot: https://ctrader.com/forum/calgo-support/15805
 // I Fixed: Use better indictor that works, Add control 'Groups', Remove account loss feature, Added multiple MATypes, Added debug statements.
 // https://raw.githubusercontent.com/camAtGitHub/cTrader-Stuff/master/SMAShift-Crossover-cbot.algo
-// Requires: SMAShift.algo. When building click 'Manage References', add 'SMAShift'
 
 namespace cAlgo.Robots
 {
