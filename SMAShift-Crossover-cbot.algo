@@ -9,6 +9,8 @@ using cAlgo.Indicators;
 // I Fixed: Use better indicator that works, Add control 'Groups', Remove account loss feature, Added multiple MATypes, Added debug statements.
 // https://raw.githubusercontent.com/camAtGitHub/cTrader-Stuff/master/SMAShift-Crossover-cbot.algo
 
+// Todo: Still have logic bugs around RangeBreakouts and not resetting BuySell state. Possibly re-write...?
+
 namespace cAlgo.Robots
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
@@ -103,7 +105,7 @@ namespace cAlgo.Robots
             // Check for silly config
             if (Period1 >= Period2)
             {
-                Print("FATAL: MA 1 Period must be LESS than MA 2 Period. Stopping Robot");
+                Print("FATAL: MA 1 Period must be LESS than MA 2 Period. Stopping Robot.");
                 Stop();
             }
 
@@ -112,6 +114,15 @@ namespace cAlgo.Robots
             {
                 Print("FATAL: Buy and Sell Order Only both enabled. No trades can be made. Quitting.");
                 Stop();
+            }
+
+            if (buyOrderOnly)
+            {
+                Print("INFO: Buy Orders Only enabled. Only going long.");
+            }
+            if (sellOrderOnly)
+            {
+                Print("INFO: Sell Orders Only enabled. Only going short.");
             }
 
             // RBO mode?
@@ -127,6 +138,16 @@ namespace cAlgo.Robots
                     Print("INFO: Range BreakOut Mode Enabled. Only selling below: Low: {0}", RBO_L);
                 }
             }
+
+            // Due to Logic problems which make my Brain go POP
+            // avoiding using RangeBreakouts and Buy/SellOrderOnly
+            // they are currently mutually exclusive
+            if (buyOrderOnly || sellOrderOnly)
+                if (RBO_H != 0 || RBO_L != 0)
+                {
+                    Print("FATAL: Due to programming bugs, RangeBreakouts and Buy/Sell Order Only can NOT be used together. Please disable one of them. Stopping.");
+                    Stop();
+                }
 
             // Initalize our SMAs
             _sma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
@@ -240,7 +261,6 @@ namespace cAlgo.Robots
                 {
                     // Still need to reset the logic
                     buySellOnlyLogic = false;
-
                 }
             }
         }
