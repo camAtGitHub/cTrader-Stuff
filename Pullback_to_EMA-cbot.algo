@@ -11,29 +11,36 @@ namespace cAlgo
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
     public class SampleTrend : Robot
     {
-        [Parameter("MA Type", DefaultValue = 1)]
+
+        [Parameter("Instance Name", DefaultValue = "401", Group = "Name / Volume")]
+        public string Label { get; set; }
+
+        //[Parameter("% of Account Risk", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 3, Group = "Name / Volume")]
+        //public double AccountRiskPercent { get; set; }
+
+        [Parameter("Lot Size", DefaultValue = 0.01, Group = "Name / Volume")]
+        public double lotsize { get; set; }
+
+        [Parameter("Stop Loss (pips)", DefaultValue = 20, MinValue = 1, Group = "Name / Volume")]
+        public double StopLossInPips { get; set; }
+
+        [Parameter("Take Profit (pips)", DefaultValue = 40, MinValue = 1, Group = "Name / Volume")]
+        public double TakeProfitInPips { get; set; }
+
+        [Parameter("Enable Trailing Stop", DefaultValue = false, Group = "Name / Volume")]
+        public bool hasTrailingStop { get; set; }
+
+        [Parameter("Bars before cancel", DefaultValue = 999, MinValue = 1, MaxValue = 999, Group = "Name / Volume")]
+        public int BarTimer { get; set; }
+
+        [Parameter("MA Type", DefaultValue = 1, Group = "MA Settings")]
         public MovingAverageType MAType { get; set; }
 
         [Parameter()]
         public DataSeries SourceSeries { get; set; }
 
-        [Parameter("EMA Periods", DefaultValue = 50)]
+        [Parameter("EMA Periods", DefaultValue = 50, Group = "MA Settings")]
         public int EMAPeriods { get; set; }
-
-        [Parameter("% of Account Risk", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 3)]
-        public double AccountRiskPercent { get; set; }
-
-        [Parameter("Stop Loss (pips)", DefaultValue = 20, MinValue = 1)]
-        public double StopLossInPips { get; set; }
-
-        [Parameter("Take Profit (pips)", DefaultValue = 40, MinValue = 1)]
-        public double TakeProfitInPips { get; set; }
-
-        [Parameter("Enable Trailing Stop", DefaultValue = false)]
-        public bool hasTrailingStop { get; set; }
-
-        [Parameter("Bars before cancel", DefaultValue = 999, MinValue = 1, MaxValue = 999)]
-        public int BarTimer { get; set; }
 
         public int BarTimerCount = 0;
 
@@ -41,8 +48,8 @@ namespace cAlgo
 
         private MovingAverage _EMA;
         string OrderType = "";
-        private const string Label = "PBBot_";
 
+        /**
         protected int calcVolume()
         {
             // Work out volume to trade
@@ -61,11 +68,12 @@ namespace cAlgo
             return Volume;
             // PlaceStopOrder(TradeType.Sell, Symbol, Volume, TargetPrice, Label, StopLossInPips, TakeProfitInPips);
         }
+**/
 
         protected override void OnStart()
         {
             checkOpenPositions();
-            Print("{0}: TimeFrame is: {1}", Symbol.Code, TimeFrame.ToString());
+            Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
             _EMA = Indicators.MovingAverage(SourceSeries, EMAPeriods, MAType);
             var currentEMA = _EMA.Result.Last(0);
             var previousEMA = _EMA.Result.Last(1);
@@ -89,11 +97,11 @@ namespace cAlgo
             var previousEMA = _EMA.Result.Last(1);
             if (OrderType == "BuyLimit")
             {
-                PlaceLimitOrder(TradeType.Buy, Symbol, calcVolume(), previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+                PlaceLimitOrder(TradeType.Buy, Symbol.Name, lotsize, previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
             }
             else
             {
-                PlaceLimitOrder(TradeType.Sell, Symbol, calcVolume(), previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+                PlaceLimitOrder(TradeType.Sell, Symbol.Name, lotsize, previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
             }
         }
         //protected override void OnTick()
@@ -105,14 +113,14 @@ namespace cAlgo
                 foreach (var position in positions)
                 {
                     Print("#------------------");
-                    Print("{0}: Position Label {1}", Symbol.Code, position.Label);
-                    Print("{0}: Position ID {1}", Symbol.Code, position.Id);
-                    Print("{0}: Profit {1}", Symbol.Code, position.GrossProfit);
-                    Print("{0}: Entry Price {1}", Symbol.Code, position.EntryPrice);
+                    Print("{0}: Position Label {1}", Symbol.Name, position.Label);
+                    Print("{0}: Position ID {1}", Symbol.Name, position.Id);
+                    Print("{0}: Profit {1}", Symbol.Name, position.GrossProfit);
+                    Print("{0}: Entry Price {1}", Symbol.Name, position.EntryPrice);
                     Print("#------------------");
-                    if (position.Label == Label + TimeFrame.ToString() && position.SymbolCode == Symbol.Code)
+                    if (position.Label == Label + TimeFrame.ToString() && position.SymbolName == Symbol.Name)
                     {
-                        Print("{0}: Open position found: Stopping", Symbol.Code);
+                        Print("{0}: Open position found: Stopping", Symbol.Name);
                         Stop();
                     }
 
@@ -124,7 +132,7 @@ namespace cAlgo
         {
             foreach (var order in PendingOrders)
             {
-                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Code)
+                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Name)
                 {
                     CancelPendingOrderAsync(order);
                 }
@@ -136,7 +144,7 @@ namespace cAlgo
         protected override void OnBar()
         {
             BarTimerCount++;
-            Print("{0}: BarTimerCount: {1}", Symbol.Code, BarTimerCount);
+            Print("{0}: BarTimerCount: {1}", Symbol.Name, BarTimerCount);
             if (BarTimerCount >= BarTimer)
             {
                 OnStop();
@@ -146,12 +154,12 @@ namespace cAlgo
             Print(OrderType);
             var currentEMA = _EMA.Result.Last(0);
             var previousEMA = _EMA.Result.Last(1);
-            Print("{0}: currentEMA: {1}", Symbol.Code, currentEMA);
-            Print("{0}: previousEMA: {1}", Symbol.Code, previousEMA);
+            Print("{0}: currentEMA: {1}", Symbol.Name, currentEMA);
+            Print("{0}: previousEMA: {1}", Symbol.Name, previousEMA);
 
             foreach (var order in PendingOrders)
             {
-                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Code)
+                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Name)
                     ModifyPendingOrder(order, previousEMA, StopLossInPips, order.TakeProfitPips, order.ExpirationTime, order.VolumeInUnits, hasTrailingStop);
             }
         }
