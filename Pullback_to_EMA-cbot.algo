@@ -97,11 +97,11 @@ namespace cAlgo
             var previousEMA = _EMA.Result.Last(1);
             if (OrderType == "BuyLimit")
             {
-                PlaceLimitOrder(TradeType.Buy, Symbol.Name, lotsize, previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+                PlaceLimitOrder(TradeType.Buy, Symbol.Name, lotsize, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
             }
             else
             {
-                PlaceLimitOrder(TradeType.Sell, Symbol.Name, lotsize, previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+                PlaceLimitOrder(TradeType.Sell, Symbol.Name, lotsize, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
             }
         }
         //protected override void OnTick()
@@ -109,7 +109,7 @@ namespace cAlgo
         protected void checkOpenPositions()
         {
             {
-                var positions = Positions.FindAll(Label + TimeFrame.ToString());
+                var positions = Positions.FindAll(Label);
                 foreach (var position in positions)
                 {
                     Print("#------------------");
@@ -132,7 +132,7 @@ namespace cAlgo
         {
             foreach (var order in PendingOrders)
             {
-                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Name)
+                if (order.Label == Label && order.SymbolCode == Symbol.Name)
                 {
                     CancelPendingOrderAsync(order);
                 }
@@ -159,7 +159,7 @@ namespace cAlgo
 
             foreach (var order in PendingOrders)
             {
-                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Name)
+                if (order.Label == Label && order.SymbolCode == Symbol.Name)
                     ModifyPendingOrder(order, previousEMA, StopLossInPips, order.TakeProfitPips, order.ExpirationTime, order.VolumeInUnits, hasTrailingStop);
             }
         }
