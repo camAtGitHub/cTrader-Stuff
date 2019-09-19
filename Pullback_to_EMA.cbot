@@ -1,0 +1,159 @@
+using System;
+using System.Linq;
+using cAlgo.API;
+using cAlgo.API.Indicators;
+using cAlgo.API.Internals;
+using cAlgo.Indicators;
+// v 1.2 - 20170824 - Added % of account balance
+
+namespace cAlgo
+{
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class SampleTrend : Robot
+    {
+        [Parameter("MA Type", DefaultValue = 1)]
+        public MovingAverageType MAType { get; set; }
+
+        [Parameter()]
+        public DataSeries SourceSeries { get; set; }
+
+        [Parameter("EMA Periods", DefaultValue = 50)]
+        public int EMAPeriods { get; set; }
+
+        [Parameter("% of Account Risk", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 3)]
+        public double AccountRiskPercent { get; set; }
+
+        [Parameter("Stop Loss (pips)", DefaultValue = 20, MinValue = 1)]
+        public double StopLossInPips { get; set; }
+
+        [Parameter("Take Profit (pips)", DefaultValue = 40, MinValue = 1)]
+        public double TakeProfitInPips { get; set; }
+
+        [Parameter("Enable Trailing Stop", DefaultValue = false)]
+        public bool hasTrailingStop { get; set; }
+
+        [Parameter("Bars before cancel", DefaultValue = 999, MinValue = 1, MaxValue = 999)]
+        public int BarTimer { get; set; }
+
+        public int BarTimerCount = 0;
+
+        public int Volume;
+
+        private MovingAverage _EMA;
+        string OrderType = "";
+        private const string Label = "PBBot_";
+
+        protected int calcVolume()
+        {
+            // Work out volume to trade
+            // https://ctdn.com/algos/indicators/show/975
+            // Percent of account to risk
+            double stopLossRiskPercent = AccountRiskPercent;
+            double pipCostPer1k = (double)(Symbol.PipValue * 1000);
+            double positionSizeForRisk = (Account.Balance * stopLossRiskPercent / 100) / (StopLossInPips * pipCostPer1k);
+            // Outputs units of 1K micro lots
+            positionSizeForRisk = Math.Round(positionSizeForRisk, 0);
+            Print("costPerPip per 1K: {0}", pipCostPer1k);
+            Print("costPerPip per {0}K: ${1}", positionSizeForRisk, positionSizeForRisk * pipCostPer1k);
+            Print("positionSizeForRisk at {0}%: {1}K", stopLossRiskPercent, positionSizeForRisk);
+            int Volume = (int)positionSizeForRisk * 1000;
+            Print("Volume: {0}", Volume);
+            return Volume;
+            // PlaceStopOrder(TradeType.Sell, Symbol, Volume, TargetPrice, Label, StopLossInPips, TakeProfitInPips);
+        }
+
+        protected override void OnStart()
+        {
+            checkOpenPositions();
+            Print("{0}: TimeFrame is: {1}", Symbol.Code, TimeFrame.ToString());
+            _EMA = Indicators.MovingAverage(SourceSeries, EMAPeriods, MAType);
+            var currentEMA = _EMA.Result.Last(0);
+            var previousEMA = _EMA.Result.Last(1);
+            // if bid less than pivot create SellStop
+            if (Symbol.Bid < currentEMA)
+            {
+                OrderType = "SellLimit";
+                // TakeProfitPrice = TargetPrice - TakeProfitInPips;
+            }
+            else
+            {
+                OrderType = "BuyLimit";
+                //   TakeProfitPrice = TargetPrice + TakeProfitInPips;
+            }
+            Print(OrderType);
+            placePendingOrder();
+        }
+
+        protected void placePendingOrder()
+        {
+            var previousEMA = _EMA.Result.Last(1);
+            if (OrderType == "BuyLimit")
+            {
+                PlaceLimitOrder(TradeType.Buy, Symbol, calcVolume(), previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+            }
+            else
+            {
+                PlaceLimitOrder(TradeType.Sell, Symbol, calcVolume(), previousEMA, Label + TimeFrame.ToString(), StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+            }
+        }
+        //protected override void OnTick()
+
+        protected void checkOpenPositions()
+        {
+            {
+                var positions = Positions.FindAll(Label + TimeFrame.ToString());
+                foreach (var position in positions)
+                {
+                    Print("#------------------");
+                    Print("{0}: Position Label {1}", Symbol.Code, position.Label);
+                    Print("{0}: Position ID {1}", Symbol.Code, position.Id);
+                    Print("{0}: Profit {1}", Symbol.Code, position.GrossProfit);
+                    Print("{0}: Entry Price {1}", Symbol.Code, position.EntryPrice);
+                    Print("#------------------");
+                    if (position.Label == Label + TimeFrame.ToString() && position.SymbolCode == Symbol.Code)
+                    {
+                        Print("{0}: Open position found: Stopping", Symbol.Code);
+                        Stop();
+                    }
+
+                }
+            }
+        }
+
+        protected override void OnStop()
+        {
+            foreach (var order in PendingOrders)
+            {
+                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Code)
+                {
+                    CancelPendingOrderAsync(order);
+                }
+            }
+            Stop();
+        }
+
+
+        protected override void OnBar()
+        {
+            BarTimerCount++;
+            Print("{0}: BarTimerCount: {1}", Symbol.Code, BarTimerCount);
+            if (BarTimerCount >= BarTimer)
+            {
+                OnStop();
+            }
+
+            checkOpenPositions();
+            Print(OrderType);
+            var currentEMA = _EMA.Result.Last(0);
+            var previousEMA = _EMA.Result.Last(1);
+            Print("{0}: currentEMA: {1}", Symbol.Code, currentEMA);
+            Print("{0}: previousEMA: {1}", Symbol.Code, previousEMA);
+
+            foreach (var order in PendingOrders)
+            {
+                if (order.Label == Label + TimeFrame.ToString() && order.SymbolCode == Symbol.Code)
+                    ModifyPendingOrder(order, previousEMA, StopLossInPips, order.TakeProfitPips, order.ExpirationTime, order.VolumeInUnits, hasTrailingStop);
+            }
+        }
+    }
+}
