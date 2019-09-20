@@ -147,6 +147,40 @@ namespace cAlgo.Robots
             }
             debug("candleOpen: {0}, Shifted MA: {1}", candleOpen, _ma1.Result.Last(Shift1));
 
+
+            //
+            // Resume old trades
+            //
+            int currentOpenSellCount = 0;
+            foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, TradeType.Sell))
+            {
+                Print(position);
+                currentOpenSellCount = (currentOpenSellCount + 1);
+            }
+            debug("DEBUG: Found {0} open \"Sell\" trades with InstanceName: {1}", currentOpenSellCount, InstanceName);
+
+            int currentOpenBuyCount = 0;
+            foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, TradeType.Buy))
+            {
+                Print(position);
+                currentOpenBuyCount = (currentOpenBuyCount + 1);
+            }
+            debug("DEBUG: Found {0} open \"Buy\" trades with InstanceName: {1}", currentOpenBuyCount, InstanceName);
+
+            // Logic around which we start the zone based on the open trades
+            if (currentOpenSellCount > 0 && currentOpenBuyCount > 0)
+            {
+                if (currentOpenSellCount > currentOpenBuyCount)
+                {
+                    // We were selling shortZone so set to False
+                    buySellLogic = false;
+                }
+                // More buys, was in buyZone
+                else
+                {
+                    buySellLogic = true;
+                }
+            }
         }
 
         protected override void OnTick()
@@ -271,6 +305,10 @@ namespace cAlgo.Robots
             }
         }
 
+//
+// Debug prints
+//
+
         private void debug(string myMessage)
         {
             if (IsDebug)
@@ -285,7 +323,21 @@ namespace cAlgo.Robots
                 Print(myMessage, myMessage2);
             }
         }
+        private void debug(double myMessage, string myMessage2)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2);
+            }
+        }
         private void debug(string myMessage, double myMessage2, double myMessage3)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2, myMessage3);
+            }
+        }
+        private void debug(string myMessage, double myMessage2, string myMessage3)
         {
             if (IsDebug)
             {
