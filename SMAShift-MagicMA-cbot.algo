@@ -79,6 +79,7 @@ namespace cAlgo.Robots
         protected override void OnStart()
         {
             Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
+            Print("The Spread of the symbol is: {0}", Math.Round(Symbol.Spread / Symbol.PipSize, 3));
 
             _tradingTime = TradingDateTime();
             if (this.IsBacktesting)
@@ -110,6 +111,15 @@ namespace cAlgo.Robots
                 Stop();
             }
 
+            if (buyOrderOnly)
+            {
+                Print("INFO: Buy Orders Only enabled. Only going long.");
+            }
+            if (sellOrderOnly)
+            {
+                Print("INFO: Sell Orders Only enabled. Only going short.");
+            }
+
             if (aggressiveReenter)
             {
                 Print("INFO: Aggressive re-entry is ENABLED. Trades will opened on next bar and everytime SL or TP is hit");
@@ -125,16 +135,17 @@ namespace cAlgo.Robots
             shiftedMAPrice = _ma1.Result.Last(Shift1);
             if (candleOpen > shiftedMAPrice)
             {
-                debug("DEBUG: Last close above MA. We are in long zone");
+                debug("DEBUG: candleOpen above MA. We are in long zone");
                 // true = buy/LongZone
                 buySellLogic = true;
             }
             else
             {
-                debug("DEBUG: Last close below MA. We are in short zone");
+                debug("DEBUG: candleOpen below MA. We are in short zone");
                 // false = sell/ShortZone
                 buySellLogic = false;
             }
+            debug("candleOpen: {0}, Shifted MA: {1}", candleOpen, _ma1.Result.Last(Shift1));
 
         }
 
@@ -189,7 +200,7 @@ namespace cAlgo.Robots
                 }
                 else
                 {
-                    // Still need to reset logic
+                    // Still need to reset logic to allow us to 'cross' back to selling
                     buySellLogic = true;
                 }
 
@@ -225,7 +236,7 @@ namespace cAlgo.Robots
                 }
                 else
                 {
-                    // Still need to reset logic
+                    // Still need to reset logic to allow us to 'cross' back to buying
                     buySellLogic = false;
                 }
             }
