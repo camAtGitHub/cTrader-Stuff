@@ -20,10 +20,7 @@ namespace cAlgo.Robots
 
         #endregion
 
-        [Parameter("Instance Name", DefaultValue = "001", Group = "Name / Volume")]
-        public string InstanceName { get; set; }
-
-        [Parameter("Lot Size", DefaultValue = 0.01, Group = "Name / Volume")]
+        [Parameter("Lot Size", DefaultValue = 0.01, Group = "Lot Size")]
         public double lotsize { get; set; }
 
         [Parameter("TakeProfitPips", DefaultValue = 10, Group = "TP / SL")]
@@ -37,6 +34,9 @@ namespace cAlgo.Robots
 
         [Parameter("Trail Distance", DefaultValue = 10, Group = "TP / SL")]
         public int Trailing { get; set; }
+
+        [Parameter("Max Spread Allowed", DefaultValue = 2.0, MinValue = 0.01, MaxValue = 999999, Group = "TP / SL")]
+        public double MaxSpreadAllowed { get; set; }
 
         [Parameter("MA 1 Type", Group = "MA 1")]
         public MovingAverageType MAType1 { get; set; }
@@ -70,16 +70,65 @@ namespace cAlgo.Robots
         [Parameter("Print Debug", DefaultValue = true, Group = "Debug")]
         public bool IsDebug { get; set; }
 
+        [Parameter("Instance Name", DefaultValue = "765", Group = "Debug")]
+        public string InstanceName { get; set; }
+
         private SMAShift _ma1 { get; set; }
 
         public double candleOpen;
         public double shiftedMAPrice;
+        // buySellLogic - true = was in BuyZone, false = sell
         public bool buySellLogic;
-        // true = foo, false = sell 
+
+        // There is logic issue with RBO's and BuySellZone crossing logic state
+        public bool RBO_HACK = false;
+
+        private bool areWeInaRange(double candleOpen, double prevCandleLow, double prevCandleHigh)
+        {
+            // Only run rangeCheck onBar and onStart to avoid whipsawing
+            if (RBO_H != 0 || RBO_L != 0)
+            {
+                if (candleOpen < RBO_H && candleOpen > RBO_L)
+                {
+                    // Reset any RBO_HACKS we may have had
+                    RBO_HACK = false;
+                    // We are in the range
+                    debug("DEBUG: We are in a range, based on candleOpen");
+                    return (true);
+                }
+                else
+                {
+                    // Was the previousCandle in the Range - If yes we just 'had' a breakout
+                    if ((prevCandleLow > RBO_L && prevCandleLow < RBO_H) || (prevCandleHigh > RBO_L && prevCandleHigh < RBO_H))
+                    {
+                        debug("DEBUG: RangeBreak Out detected");
+                        RBO_HACK = true;
+                    }
+                    // No longer in the range
+                    return (false);
+                }
+            }
+            else
+            {
+                // RangeBreakout Mode disabled
+                return (false);
+
+            }
+        }
+
+
+
+
+        private double calcSpread()
+        {
+            return (Math.Round(Symbol.Spread / Symbol.PipSize, 3));
+        }
+
         protected override void OnStart()
         {
             Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
-            Print("The Spread of the symbol is: {0}", Math.Round(Symbol.Spread / Symbol.PipSize, 3));
+            Print("The Spread of the symbol is: {0}", calcSpread());
+            Print("LOT SIZE Trade Lot Size: {0}", lotsize);
 
             _tradingTime = TradingDateTime();
             if (this.IsBacktesting)
@@ -147,7 +196,6 @@ namespace cAlgo.Robots
             }
             debug("candleOpen: {0}, Shifted MA: {1}", candleOpen, _ma1.Result.Last(Shift1));
 
-
             //
             // Resume old trades
             //
@@ -194,18 +242,21 @@ namespace cAlgo.Robots
         {
             //TRAILING();
 
+
             debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
 
             // Configure Price
             // -2 Closed Bar / -1 Current Bar
             int index = MarketSeries.Open.Count - 1;
             candleOpen = MarketSeries.Open[index];
+            double prevCandleLow = MarketSeries.Low[-2];
+            double prevCandleHigh = MarketSeries.High[-2];
+
             // Set MA to var
             shiftedMAPrice = _ma1.Result.Last(Shift1);
 
             debug("candleOpen: {0}", candleOpen);
             debug("ShiftedMAPrice : {0}", shiftedMAPrice);
-
 
             if (candleOpen > shiftedMAPrice)
             {
@@ -213,23 +264,36 @@ namespace cAlgo.Robots
                 {
                     ClosePosition(TradeType.Sell);
                 }
-                if (!sellOrderOnly)
+                // If we are not in a range, we can proceed
+                if (!areWeInaRange(candleOpen, prevCandleLow, prevCandleHigh))
                 {
-                    // if buySellLogic is false, we were previously in sell/ShortZone
-                    if (!buySellLogic || aggressiveReenter)
+                    if (!sellOrderOnly)
                     {
-                        buySellLogic = true;
-                        if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                        // if buySellLogic is false, we were previously in sell/ShortZone
+                        if (!buySellLogic || (aggressiveReenter || RBO_HACK))
                         {
-                            // Have we broken out of a range
-                            if (candleOpen > RBO_H || RBO_H == 0)
+                            buySellLogic = true;
+                            if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
                             {
-                                debug("IF1");
-                                debug("ExecuteMarketOrder(TradeType.Buy)");
-                                double volume = Symbol.QuantityToVolumeInUnits(lotsize);
-                                ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
+                                // Check Spreads
+                                if (calcSpread() < MaxSpreadAllowed)
+                                {
+                                    debug("IF1");
+                                    debug("ExecuteMarketOrder(TradeType.Buy)");
+                                    double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                                    ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
+                                }
+                                else
+                                {
+                                    Print("INFO: Trade not taken due to currentSpread: {0}", calcSpread());
+                                }
                             }
                         }
+                    }
+                    else
+                    {
+                        // Still need to reset logic to allow us to 'cross' back to selling
+                        buySellLogic = true;
                     }
                 }
                 else
@@ -237,8 +301,8 @@ namespace cAlgo.Robots
                     // Still need to reset logic to allow us to 'cross' back to selling
                     buySellLogic = true;
                 }
-
             }
+
 
 
             if (candleOpen < shiftedMAPrice)
@@ -247,25 +311,35 @@ namespace cAlgo.Robots
                 {
                     ClosePosition(TradeType.Buy);
                 }
-                if (!buyOrderOnly)
+                // If we are not in a range, we can proceed
+                if (!areWeInaRange(candleOpen, prevCandleLow, prevCandleHigh))
                 {
-                    // if buySellLogic is true, we were previously in buy/LongZone
-                    if (buySellLogic || aggressiveReenter)
+                    if (!buyOrderOnly)
                     {
-                        buySellLogic = false;
-                        if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                        // if buySellLogic is true, we were previously in buy/LongZone
+                        if (buySellLogic || (aggressiveReenter || RBO_HACK))
                         {
-                            // Have we broken out of a range
-                            if (candleOpen < RBO_L || RBO_L == 0)
+                            buySellLogic = false;
+                            if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
                             {
+                                if (calcSpread() < MaxSpreadAllowed)
                                 {
                                     debug("IF2");
                                     debug("ExecuteMarketOrder(TradeType.Sell)");
                                     double volume = Symbol.QuantityToVolumeInUnits(lotsize);
                                     ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
                                 }
+                                else
+                                {
+                                    Print("INFO: Trade not taken due to currentSpread: {0}", calcSpread());
+                                }
                             }
                         }
+                    }
+                    else
+                    {
+                        // Still need to reset logic to allow us to 'cross' back to buying
+                        buySellLogic = false;
                     }
                 }
                 else
@@ -275,6 +349,9 @@ namespace cAlgo.Robots
                 }
             }
         }
+
+
+
 
         protected override void OnStop()
         {
