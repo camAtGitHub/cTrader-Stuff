@@ -88,6 +88,7 @@ namespace cAlgo.Robots
             // Only run rangeCheck onBar and onStart to avoid whipsawing
             if (RBO_H != 0 || RBO_L != 0)
             {
+                debug("DEBUG: prevCandleLow: {0}, prevCandleHigh: {1}", prevCandleLow, prevCandleHigh);
                 if (candleOpen < RBO_H && candleOpen > RBO_L)
                 {
                     // Reset any RBO_HACKS we may have had
@@ -99,12 +100,19 @@ namespace cAlgo.Robots
                 else
                 {
                     // Was the previousCandle in the Range - If yes we just 'had' a breakout
-                    if ((prevCandleLow > RBO_L && prevCandleLow < RBO_H) || (prevCandleHigh > RBO_L && prevCandleHigh < RBO_H))
+                    // Plus edge cases of extra big candles smashing through ranges
+                    if ((prevCandleLow < RBO_H && prevCandleLow > RBO_L) || (prevCandleHigh > RBO_L && prevCandleHigh < RBO_H))
                     {
                         debug("DEBUG: RangeBreak Out detected");
                         RBO_HACK = true;
                     }
+                    else
+                    {
+                        // Reset any RBO_HACKS we may have had
+                        RBO_HACK = false;
+                    }
                     // No longer in the range
+                    debug(" ZZZ Not in range");
                     return (false);
                 }
             }
@@ -249,8 +257,9 @@ namespace cAlgo.Robots
             // -2 Closed Bar / -1 Current Bar
             int index = MarketSeries.Open.Count - 1;
             candleOpen = MarketSeries.Open[index];
-            double prevCandleLow = MarketSeries.Low[-2];
-            double prevCandleHigh = MarketSeries.High[-2];
+            double prevCandleLow = MarketSeries.Low[MarketSeries.Low.Count - 2];
+            double prevCandleHigh = MarketSeries.High[MarketSeries.High.Count - 2];
+
 
             // Set MA to var
             shiftedMAPrice = _ma1.Result.Last(Shift1);
