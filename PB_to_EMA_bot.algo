@@ -1,0 +1,299 @@
+using System;
+using System.Linq;
+using cAlgo.API;
+using cAlgo.API.Indicators;
+using cAlgo.API.Internals;
+using cAlgo.Indicators;
+// v001 - Oct 2019 - Place limit orders at EMA 
+
+namespace cAlgo
+{
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class PBEMABot : Robot
+    {
+
+        //[Parameter("% of Account Risk", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 3, Group = "Name / Volume")]
+        //public double AccountRiskPercent { get; set; }
+
+        [Parameter("Lot Size", DefaultValue = 0.01, Group = "Name / Volume")]
+        public double lotsize { get; set; }
+        // Requires volume calc further down
+
+        [Parameter("Stop Loss (pips)", DefaultValue = 20, MinValue = 1, Group = "Name / Volume")]
+        public double StopLossInPips { get; set; }
+
+        [Parameter("Take Profit (pips)", DefaultValue = 40, MinValue = 1, Group = "Name / Volume")]
+        public double TakeProfitInPips { get; set; }
+
+        [Parameter("Enable Trailing Stop", DefaultValue = false, Group = "Name / Volume")]
+        public bool hasTrailingStop { get; set; }
+
+        [Parameter("Bars before cancel", DefaultValue = 999999, MinValue = 1, MaxValue = 99999, Group = "Name / Volume")]
+        public int BarTimer { get; set; }
+
+        [Parameter("MA Type", DefaultValue = 1, Group = "MA Settings")]
+        public MovingAverageType MAType { get; set; }
+
+        [Parameter()]
+        public DataSeries SourceSeries { get; set; }
+
+        [Parameter("EMA Periods", DefaultValue = 50, Group = "MA Settings")]
+        public int EMAPeriods { get; set; }
+
+        [Parameter("Instance Name", DefaultValue = "401", Group = "Debug")]
+        public string Label { get; set; }
+
+        public int BarTimerCount = 0;
+
+        public bool openOrderFlag;
+        public bool pendingOrderFlag;
+
+        //public int Volume;
+
+        private MovingAverage _EMA;
+        string OrderType = "";
+
+        /**
+        protected int calcVolume()
+        {
+            // Work out volume to trade
+            // https://ctdn.com/algos/indicators/show/975
+            // Percent of account to risk
+            double stopLossRiskPercent = AccountRiskPercent;
+            double pipCostPer1k = (double)(Symbol.PipValue * 1000);
+            double positionSizeForRisk = (Account.Balance * stopLossRiskPercent / 100) / (StopLossInPips * pipCostPer1k);
+            // Outputs units of 1K micro lots
+            positionSizeForRisk = Math.Round(positionSizeForRisk, 0);
+            Print("costPerPip per 1K: {0}", pipCostPer1k);
+            Print("costPerPip per {0}K: ${1}", positionSizeForRisk, positionSizeForRisk * pipCostPer1k);
+            Print("positionSizeForRisk at {0}%: {1}K", stopLossRiskPercent, positionSizeForRisk);
+            int Volume = (int)positionSizeForRisk * 1000;
+            Print("Volume: {0}", Volume);
+            return Volume;
+            // PlaceStopOrder(TradeType.Sell, Symbol, Volume, TargetPrice, Label, StopLossInPips, TakeProfitInPips);
+        }
+**/
+
+        protected override void OnStart()
+        {
+            checkOpenPositions();
+            Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
+            Print("Instance Name: {0}", Label);
+            placePendingOrder();
+        }
+
+
+        protected void placePendingOrder()
+        {
+
+            _EMA = Indicators.MovingAverage(SourceSeries, EMAPeriods, MAType);
+            var currentEMA = _EMA.Result.Last(0);
+            var previousEMA = _EMA.Result.Last(1);
+            // if bid less than pivot create SellStop
+            if (Symbol.Bid < currentEMA)
+            {
+                OrderType = "SellLimit";
+                // TakeProfitPrice = TargetPrice - TakeProfitInPips;
+            }
+            else
+            {
+                OrderType = "BuyLimit";
+                //   TakeProfitPrice = TargetPrice + TakeProfitInPips;
+            }
+            Print("Setting an order of type: {0}", OrderType);
+            double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+            if (OrderType == "BuyLimit")
+            {
+                PlaceLimitOrder(TradeType.Buy, Symbol.Name, volume, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+            }
+            else
+            {
+                PlaceLimitOrder(TradeType.Sell, Symbol.Name, volume, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+            }
+        }
+        //protected override void OnTick()
+
+        protected bool checkOpenPositions()
+        {
+            {
+                // reset openOrderFlag for next test
+                openOrderFlag = false;
+
+                var positions = Positions.FindAll(Label);
+                foreach (var position in positions)
+                {
+                    Print("#------------------");
+                    Print("{0}: Position Label {1}", Symbol.Name, position.Label);
+                    Print("{0}: Position ID {1}", Symbol.Name, position.Id);
+                    Print("{0}: Profit {1}", Symbol.Name, position.GrossProfit);
+                    Print("{0}: Entry Price {1}", Symbol.Name, position.EntryPrice);
+                    Print("#------------------");
+
+                    if (position.Label == Label && position.SymbolName == Symbol.Name)
+                    {
+                        Print("{0}: Open position found: ", Symbol.Name);
+                        openOrderFlag = true;
+                    }
+                }
+                return (openOrderFlag);
+            }
+        }
+
+        protected override void OnStop()
+        {
+            foreach (var order in PendingOrders)
+            {
+                if (order.Label == Label && order.SymbolCode == Symbol.Name)
+                {
+                    CancelPendingOrderAsync(order);
+                }
+            }
+            Stop();
+        }
+
+
+        protected override void OnBar()
+        {
+            // reset for next test
+            pendingOrderFlag = false;
+
+            BarTimerCount++;
+            Print("{0}: BarTimerCount: {1}", Symbol.Name, BarTimerCount);
+            if (BarTimerCount >= BarTimer)
+            {
+                OnStop();
+            }
+
+            var currentEMA = _EMA.Result.Last(0);
+            var previousEMA = _EMA.Result.Last(1);
+            Print("{0}: currentEMA: {1}", Symbol.Name, currentEMA);
+            Print("{0}: previousEMA: {1}", Symbol.Name, previousEMA);
+
+            foreach (var order in PendingOrders)
+            {
+                if (order.Label == Label && order.SymbolCode == Symbol.Name)
+                {
+                    ModifyPendingOrder(order, previousEMA, StopLossInPips, order.TakeProfitPips, order.ExpirationTime, order.VolumeInUnits, hasTrailingStop);
+                    pendingOrderFlag = true;
+                }
+            }
+            // If we 
+            if (!pendingOrderFlag && !checkOpenPositions())
+            {
+                Print("No orders or positions found. Placing Pending Order.");
+                placePendingOrder();
+            }
+        }
+
+        //
+        // START - Play around with getFitness
+        //
+        protected override double GetFitness(GetFitnessArgs args)
+        {
+            //return _fit_winLossRatio(args);
+            //return _fit_MaxWinTrade_MinLosses(args);
+            //return _fit_MaxWinTrade_MinLosses2(args);
+            //return _fit_PessimisticReturnOnMargin(args);
+            return _fit_PessimisticReturnOnMarginDrawDown(args);
+        }
+
+        private double _fit_winLossRatio(GetFitnessArgs args)
+        {
+            return args.WinningTrades / (args.WinningTrades + args.LosingTrades + 1);
+        }
+        //maximize count of winning trades and minimize count of losing trades
+        private double _fit_MaxWinTrade_MinLosses(GetFitnessArgs args)
+        {
+            return (args.NetProfit * args.WinningTrades * TakeProfitInPips) / (args.MaxEquityDrawdownPercentages * StopLossInPips);
+        }
+        private double _fit_MaxWinTrade_MinLosses2(GetFitnessArgs args)
+        {
+            return (Math.Pow(args.NetProfit, 3) * Math.Pow(args.WinningTrades, 2) * (TakeProfitInPips / StopLossInPips)) / (Math.Pow(args.MaxEquityDrawdownPercentages, 2) * TakeProfitInPips * StopLossInPips * args.MaxEquityDrawdown);
+        }
+        private double _fit_PessimisticReturnOnMargin(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades - sqrtLosses))) / AccountSize) * 100;
+        }
+        // Add some sort of weighting to drawdown - not sure how mathmatically correct it is
+        private double _fit_PessimisticReturnOnMarginDrawDown(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return ((((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades + sqrtLosses))) / AccountSize) * 10000) / Math.Sqrt(args.MaxEquityDrawdownPercentages);
+        }
+
+        //
+        // END - Play around with getFitness
+        //
+    }
+}
