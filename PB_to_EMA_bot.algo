@@ -28,7 +28,7 @@ namespace cAlgo
         [Parameter("Enable Trailing Stop", DefaultValue = false, Group = "Name / Volume")]
         public bool hasTrailingStop { get; set; }
 
-        [Parameter("Bars before cancel", DefaultValue = 999999, MinValue = 1, MaxValue = 99999, Group = "Name / Volume")]
+        [Parameter("Bars before cancel", DefaultValue = 99999, MinValue = 1, MaxValue = 99999, Group = "Name / Volume")]
         public int BarTimer { get; set; }
 
         [Parameter("MA Type", DefaultValue = 1, Group = "MA Settings")]
@@ -47,6 +47,7 @@ namespace cAlgo
 
         public bool openOrderFlag;
         public bool pendingOrderFlag;
+        public string myComment;
 
         //public int Volume;
 
@@ -77,9 +78,15 @@ namespace cAlgo
         protected override void OnStart()
         {
             checkOpenPositions();
+            myComment = "EMA_PB_Bot EMA: " + EMAPeriods + " TF: " + TimeFrame.ToString();
+            Print("Trade Comment: {0}", myComment);
             Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
             Print("Instance Name: {0}", Label);
-            placePendingOrder();
+            if (!pendingOrderFlag && !checkOpenPositions())
+            {
+                Print("No orders or positions found. Placing Pending Order.");
+                placePendingOrder();
+            }
         }
 
 
@@ -104,11 +111,11 @@ namespace cAlgo
             double volume = Symbol.QuantityToVolumeInUnits(lotsize);
             if (OrderType == "BuyLimit")
             {
-                PlaceLimitOrder(TradeType.Buy, Symbol.Name, volume, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+                PlaceLimitOrder(TradeType.Buy, Symbol.Name, volume, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, myComment, hasTrailingStop);
             }
             else
             {
-                PlaceLimitOrder(TradeType.Sell, Symbol.Name, volume, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, null, hasTrailingStop);
+                PlaceLimitOrder(TradeType.Sell, Symbol.Name, volume, previousEMA, Label, StopLossInPips, TakeProfitInPips, null, myComment, hasTrailingStop);
             }
         }
         //protected override void OnTick()
