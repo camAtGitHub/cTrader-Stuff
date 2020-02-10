@@ -1,0 +1,685 @@
+using System;
+using System.Linq;
+using cAlgo.API;
+using cAlgo.API.Indicators;
+using cAlgo.API.Internals;
+using cAlgo.Indicators;
+using System.Timers;
+
+// https://raw.githubusercontent.com/camAtGitHub/cTrader-Stuff/master/SMAShift-MagicMA-cbot.algo
+// Requires: SMAShift.algo. When building click 'Manage References', add 'SMAShift'
+// Requires: ATR_in_Pips.calgo. When building click 'Manage References', add 'ATR_in_Pips'
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class z_MAgicMA : Robot
+    {
+        #region Private variables
+
+        private DateTime _tradingTime { get; set; }
+
+        #endregion
+
+        [Parameter("Lot Size", DefaultValue = 0.01, Group = "Name / Volume")]
+        public double lotsize { get; set; }
+
+        [Parameter("Max Spread Allowed", DefaultValue = 2.0, MinValue = 0.01, MaxValue = 999999, Group = "Name / Volume")]
+        public double MaxSpreadAllowed { get; set; }
+
+        [Parameter("Enable ATR StopLoss", DefaultValue = false, Group = "StopLoss")]
+        public bool ATRStopLoss { get; set; }
+
+        [Parameter("ATR StopLoss Multiplier", DefaultValue = 2, MinValue = 1, MaxValue = 50, Group = "StopLoss")]
+        public int ATRStopLossMulti { get; set; }
+
+        [Parameter("OR StopLossPips", DefaultValue = 10, MinValue = 0, Group = "StopLoss")]
+        public double SL { get; set; }
+
+        [Parameter("SL Trigger ATR Multiplier ", DefaultValue = 0, MinValue = 0, MaxValue = 50, Group = "StopLoss Trailing")]
+        public int Trigger { get; set; }
+
+        [Parameter("SL Trail ATR Multiplier", DefaultValue = 0, MinValue = 0, MaxValue = 50, Group = "StopLoss Trailing")]
+        public int Trailing { get; set; }
+
+        [Parameter("Enable ATR TakeProfit", DefaultValue = false, Group = "TakeProfit")]
+        public bool ATR_TP { get; set; }
+
+        [Parameter("ATR TP Multiplier", DefaultValue = 2, MinValue = 0, MaxValue = 50, Group = "TakeProfit")]
+        public int ATR_TPMulti { get; set; }
+
+        [Parameter("OR TakeProfitPips", DefaultValue = 10, Group = "TakeProfit")]
+        public double TP { get; set; }
+
+        [Parameter("MA 1 Type", Group = "MA 1")]
+        public MovingAverageType MAType1 { get; set; }
+
+        [Parameter("MA 1 Source", Group = "MA 1")]
+        public DataSeries Source1 { get; set; }
+
+        [Parameter("MA 1 Periods", DefaultValue = 1, MinValue = 1, MaxValue = 300, Group = "MA 1")]
+        public int Period1 { get; set; }
+
+        [Parameter("MA 1 Shift", DefaultValue = 6, MinValue = -100, MaxValue = 500, Group = "MA 1")]
+        public int Shift1 { get; set; }
+
+        // ATR Parameters
+        [Parameter("ATR TimeFrame", Group = "ATR Settings")]
+        public TimeFrame AtrTimeFrame { get; set; }
+
+        [Parameter("ATR Period", DefaultValue = 20, Group = "ATR Settings")]
+        public int AtrPeriod { get; set; }
+
+        [Parameter("ATR MAType", Group = "ATR Settings")]
+        public MovingAverageType AtrMaType { get; set; }
+
+        public double CurrentATRInPips;
+        private PipsATRIndicator _atr { get; set; }
+
+        // Range Break Out (BO)
+        [Parameter("Range BO High", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
+        public double RBO_H { get; set; }
+        // Range Break Out (BO)
+        [Parameter("Range BO Low", DefaultValue = 0, MinValue = 0, MaxValue = 999999, Group = "Range BreakOut")]
+        public double RBO_L { get; set; }
+
+        [Parameter("Buy Orders Only", DefaultValue = false, Group = "OrderTypes")]
+        public bool buyOrderOnly { get; set; }
+
+        [Parameter("Sell Orders Only", DefaultValue = false, Group = "OrderTypes")]
+        public bool sellOrderOnly { get; set; }
+
+        // If this setting is enabled and you have no positions open
+        // then the robot will place a trade on the next onBar(). Might result in poor entries.
+        [Parameter("Aggressive re-entry", DefaultValue = false, Group = "OrderTypes")]
+        public bool aggressiveReenter { get; set; }
+
+        [Parameter("Print Debug", DefaultValue = true, Group = "Debug")]
+        public bool IsDebug { get; set; }
+
+        [Parameter("Instance Name", DefaultValue = "765", Group = "Debug")]
+        public string InstanceName { get; set; }
+
+        private SMAShift _ma1 { get; set; }
+
+        public double candleOpen;
+        public double shiftedMAPrice;
+        // buySellLogic - true = was in BuyZone, false = sell
+        public bool buySellLogic;
+
+        // There is logic issue with RBO's and BuySellZone crossing logic state
+        public bool RBO_HACK = false;
+
+        private bool areWeInaRange(double candleOpen, double prevCandleLow, double prevCandleHigh)
+        {
+            // Only run rangeCheck onBar and onStart to avoid whipsawing
+            if (RBO_H != 0 || RBO_L != 0)
+            {
+                debug("DEBUG: prevCandleLow: {0}, prevCandleHigh: {1}", prevCandleLow, prevCandleHigh);
+                if (candleOpen < RBO_H && candleOpen > RBO_L)
+                {
+                    // Reset any RBO_HACKS we may have had
+                    RBO_HACK = false;
+                    // We are in the range
+                    debug("DEBUG: We are in a range, based on candleOpen");
+                    return (true);
+                }
+                else
+                {
+                    // Was the previousCandle in the Range - If yes we just 'had' a breakout
+                    // Plus edge cases of extra big candles smashing through ranges
+                    if ((prevCandleLow < RBO_H && prevCandleLow > RBO_L) || (prevCandleHigh > RBO_L && prevCandleHigh < RBO_H))
+                    {
+                        debug("DEBUG: RangeBreak Out detected");
+                        RBO_HACK = true;
+                    }
+                    else
+                    {
+                        // Reset any RBO_HACKS we may have had
+                        RBO_HACK = false;
+                    }
+                    // No longer in the range
+                    debug(" ZZZ Not in range");
+                    return (false);
+                }
+            }
+            else
+            {
+                // RangeBreakout Mode disabled
+                return (false);
+
+            }
+        }
+
+
+
+
+        private double calcSpread()
+        {
+            return (Math.Round(Symbol.Spread / Symbol.PipSize, 3));
+        }
+
+        protected override void OnStart()
+        {
+
+            // Check that the SL Trail Multiplier isnt larger than the TP Multiplier.
+            // Optimise backtesting / optimize testing - Mostly.
+            if (ATR_TP)
+            {
+                if (Trailing > ATR_TPMulti)
+                {
+                    Print("ERROR: Trail cant be higher than ATRStopLossMulti");
+                    OnStop();
+                }
+                if (Trigger > ATR_TPMulti)
+                {
+                    Print("ERROR: Trigger cant be higher than ATRStopLossMulti");
+                    OnStop();
+                }
+                if ((Trigger > 0 || Trailing > 0) && (Trigger == 0 || Trailing == 0))
+                {
+                    Print("ERROR: Either Trailing Params are Enabled or 0");
+                    OnStop();
+                }
+            }
+
+            // Init our ATR indicator
+            _atr = Indicators.GetIndicator<PipsATRIndicator>(AtrTimeFrame, AtrPeriod, AtrMaType);
+            CurrentATRInPips = Math.Round(_atr.Result.LastValue, 0);
+            //Print("ATR: {0}", _atr.Result.LastValue);
+            if (ATRStopLoss)
+            {
+                Print("Using ATR Based StopLoss - StopLoss will change every bar");
+                Print("Current settings show ATR as: {0}", CurrentATRInPips);
+                Print("Current ATR SL Multiplier is {0}, Current StopLoss is: {1}", ATRStopLossMulti, ATRStopLossMulti * CurrentATRInPips);
+            }
+            if (ATR_TP)
+            {
+                Print("Using ATR Based TakeProfit - TP will change every bar");
+                Print("Current settings show ATR as: {0}", CurrentATRInPips);
+                Print("Current ATR TP Multiplier is {0}, Current TP is: {1}", ATR_TPMulti, ATR_TPMulti * CurrentATRInPips);
+            }
+
+            Print("{0}: TimeFrame is: {1}", Symbol.Name, TimeFrame.ToString());
+            Print("The Spread of the symbol is: {0}", calcSpread());
+            Print("LOT SIZE Trade Lot Size: {0}", lotsize);
+
+            _tradingTime = TradingDateTime();
+            if (this.IsBacktesting)
+            {
+                Print("Using server time for trading (UTC+0): " + _tradingTime.ToLongTimeString());
+            }
+            else
+            {
+                Print("Using PC time for trading: " + _tradingTime.ToLongTimeString());
+            }
+
+            // RBO mode?
+            if (RBO_H != 0 || RBO_L != 0)
+            {
+                Print("INFO: Range BreakOut Mode Enabled.");
+                if (RBO_H != 0)
+                {
+                    Print("INFO: Range BreakOut Mode Enabled. Only buying above: High: {0}", RBO_H);
+                }
+                if (RBO_L != 0)
+                {
+                    Print("INFO: Range BreakOut Mode Enabled. Only selling below: Low: {0}", RBO_L);
+                }
+            }
+            // Check for stupid config
+            if (buyOrderOnly && sellOrderOnly)
+            {
+                Print("FATAL: Buy and Sell Order Only both enabled. No trades can be made. Quitting.");
+                Stop();
+            }
+
+            if (buyOrderOnly)
+            {
+                Print("INFO: Buy Orders Only enabled. Only going long.");
+            }
+            if (sellOrderOnly)
+            {
+                Print("INFO: Sell Orders Only enabled. Only going short.");
+            }
+
+            if (aggressiveReenter)
+            {
+                Print("INFO: Aggressive re-entry is ENABLED. Trades will opened on next bar and everytime SL or TP is hit");
+            }
+
+            // Init our MA indicator
+            _ma1 = Indicators.GetIndicator<SMAShift>(MAType1, Source1, Period1, Shift1);
+
+            // Work Out Buy/Sell once per cross-over logic
+            int index = Bars.OpenPrices.Count - 1;
+            candleOpen = Bars.OpenPrices[index];
+            // Set MA to var
+            shiftedMAPrice = _ma1.Result.Last(Shift1);
+            if (candleOpen > shiftedMAPrice)
+            {
+                debug("DEBUG: candleOpen above MA. We are in long zone");
+                // true = buy/LongZone
+                buySellLogic = true;
+            }
+            else
+            {
+                debug("DEBUG: candleOpen below MA. We are in short zone");
+                // false = sell/ShortZone
+                buySellLogic = false;
+            }
+            debug("candleOpen: {0}, Shifted MA: {1}", candleOpen, _ma1.Result.Last(Shift1));
+
+            //
+            // Resume old trades
+            //
+            int currentOpenSellCount = 0;
+            foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, TradeType.Sell))
+            {
+                Print(position);
+                currentOpenSellCount = (currentOpenSellCount + 1);
+            }
+            debug("DEBUG: Found {0} open \"Sell\" trades with InstanceName: {1}", currentOpenSellCount, InstanceName);
+
+            int currentOpenBuyCount = 0;
+            foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, TradeType.Buy))
+            {
+                Print(position);
+                currentOpenBuyCount = (currentOpenBuyCount + 1);
+            }
+            debug("DEBUG: Found {0} open \"Buy\" trades with InstanceName: {1}", currentOpenBuyCount, InstanceName);
+
+            // Logic around which we start the zone based on the open trades
+            if (currentOpenSellCount > 0 && currentOpenBuyCount > 0)
+            {
+                if (currentOpenSellCount > currentOpenBuyCount)
+                {
+                    // We were selling shortZone so set to False
+                    buySellLogic = false;
+                }
+                // More buys, was in buyZone
+                else
+                {
+                    buySellLogic = true;
+                }
+            }
+        }
+
+        protected override void OnTick()
+        {
+            TRAILING();
+
+            //debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
+        }
+
+        protected override void OnBar()
+        {
+
+            _atr = Indicators.GetIndicator<PipsATRIndicator>(AtrTimeFrame, AtrPeriod, AtrMaType);
+            CurrentATRInPips = Math.Round(_atr.Result.LastValue, 0);
+
+            double myATRStopLoss;
+            myATRStopLoss = ATRStopLossMulti * CurrentATRInPips;
+            double myATR_TP;
+            myATR_TP = ATR_TPMulti * CurrentATRInPips;
+
+            if (ATRStopLoss)
+            {
+                // Safety first - We are dealing with stopLosses 
+                if (Double.IsNaN(myATRStopLoss))
+                {
+                    Print("FATAL: ATRStopLoss is NaN! - STOPPING");
+                    OnStop();
+                }
+                else
+                {
+                    SL = myATRStopLoss;
+                }
+            }
+            if (ATR_TP)
+            {
+                TP = myATR_TP;
+            }
+
+            //TRAILING(); // Happening onTick() instead.
+            debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
+
+            // Configure Price
+            // -2 Closed Bar / -1 Current Bar
+            int index = Bars.OpenPrices.Count - 1;
+            candleOpen = Bars.OpenPrices[index];
+            double prevCandleLow = Bars.LowPrices[Bars.LowPrices.Count - 2];
+            double prevCandleHigh = Bars.HighPrices[Bars.HighPrices.Count - 2];
+
+
+            // Set MA to var
+            shiftedMAPrice = _ma1.Result.Last(Shift1);
+
+            debug("candleOpen: {0}", candleOpen);
+            debug("ShiftedMAPrice : {0}", shiftedMAPrice);
+
+            if (candleOpen > shiftedMAPrice)
+            {
+                if (Positions.Count(x => x.TradeType == TradeType.Sell) != 0)
+                {
+                    ClosePosition(TradeType.Sell);
+                }
+                // If we are not in a range, we can proceed
+                if (!areWeInaRange(candleOpen, prevCandleLow, prevCandleHigh))
+                {
+                    if (!sellOrderOnly)
+                    {
+                        // if buySellLogic is false, we were previously in sell/ShortZone
+                        if (!buySellLogic || (aggressiveReenter || RBO_HACK))
+                        {
+                            buySellLogic = true;
+                            if (Positions.Count(x => x.TradeType == TradeType.Buy) == 0)
+                            {
+                                // Check Spreads
+                                if (calcSpread() < MaxSpreadAllowed)
+                                {
+                                    debug("IF1");
+                                    debug("ExecuteMarketOrder(TradeType.Buy)");
+                                    double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                                    ExecuteMarketOrder(TradeType.Buy, this.SymbolName, volume, InstanceName, SL, TP);
+                                }
+                                else
+                                {
+                                    Print("INFO: Trade not taken due to currentSpread: {0}", calcSpread());
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Still need to reset logic to allow us to 'cross' back to selling
+                        buySellLogic = true;
+                    }
+                }
+                else
+                {
+                    // Still need to reset logic to allow us to 'cross' back to selling
+                    buySellLogic = true;
+                }
+            }
+
+
+
+            if (candleOpen < shiftedMAPrice)
+            {
+                if (Positions.Count(x => x.TradeType == TradeType.Buy) != 0)
+                {
+                    ClosePosition(TradeType.Buy);
+                }
+                // If we are not in a range, we can proceed
+                if (!areWeInaRange(candleOpen, prevCandleLow, prevCandleHigh))
+                {
+                    if (!buyOrderOnly)
+                    {
+                        // if buySellLogic is true, we were previously in buy/LongZone
+                        if (buySellLogic || (aggressiveReenter || RBO_HACK))
+                        {
+                            buySellLogic = false;
+                            if (Positions.Count(x => x.TradeType == TradeType.Sell) == 0)
+                            {
+                                if (calcSpread() < MaxSpreadAllowed)
+                                {
+                                    debug("IF2");
+                                    debug("ExecuteMarketOrder(TradeType.Sell)");
+                                    double volume = Symbol.QuantityToVolumeInUnits(lotsize);
+                                    ExecuteMarketOrder(TradeType.Sell, SymbolName, volume, InstanceName, SL, TP);
+                                }
+                                else
+                                {
+                                    Print("INFO: Trade not taken due to currentSpread: {0}", calcSpread());
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Still need to reset logic to allow us to 'cross' back to buying
+                        buySellLogic = false;
+                    }
+                }
+                else
+                {
+                    // Still need to reset logic to allow us to 'cross' back to buying
+                    buySellLogic = false;
+                }
+            }
+        }
+
+
+
+
+        protected override void OnStop()
+        {
+            Stop();
+        }
+
+        public DateTime TradingDateTime()
+        {
+            if (this.IsBacktesting)
+            {
+                return Server.Time;
+            }
+            else
+            {
+                return TimeZoneInfo.ConvertTime(DateTime.Now, TimeZoneInfo.Local);
+            }
+        }
+
+        private void ClosePosition(TradeType type)
+        {
+            var p = Positions.Find(InstanceName, this.SymbolName, type);
+
+            if (p != null)
+            {
+                debug("DEBUG: ClosePosition()");
+                foreach (var position in Positions.FindAll(InstanceName, this.SymbolName, type))
+                    ClosePosition(position);
+            }
+        }
+
+
+        ///////////////////////////////////////////////////
+        // Trailing
+        ///////////////////////////////////////////////////
+
+
+        private void TRAILING()
+        {
+            //Print("Current ATR SL Multiplier is {0}, Current StopLoss is: {1}", ATRStopLossMulti, ATRStopLossMulti * CurrentATRInPips);
+
+            if (Trailing > 0 && Trigger > 0)
+            {
+                Position[] positions = Positions.FindAll(InstanceName, SymbolName);
+                foreach (Position position in positions)
+                {
+                    if (position.TradeType == TradeType.Sell)
+                    {
+                        double distance = position.EntryPrice - Symbol.Ask;
+                        if (distance >= (Trigger * CurrentATRInPips) * Symbol.PipSize)
+                        {
+                            double newStopLossPrice = Symbol.Ask + (Trailing * CurrentATRInPips) * Symbol.PipSize;
+                            if (position.StopLoss == null || newStopLossPrice < position.StopLoss)
+                            {
+                                //Print("StopLoss / ModifyPosition");
+                                ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            }
+                        }
+                    }
+
+                    else
+                    {
+                        double distance = Symbol.Bid - position.EntryPrice;
+                        if (distance >= (Trigger * CurrentATRInPips) * Symbol.PipSize)
+                        {
+                            double newStopLossPrice = Symbol.Bid - (Trailing * CurrentATRInPips) * Symbol.PipSize;
+                            if (position.StopLoss == null || newStopLossPrice > position.StopLoss)
+                            {
+                                //Print("StopLoss / ModifyPosition2");
+                                ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        ///////////////////////////////////////
+        // Debug prints
+        ///////////////////////////////////////
+
+        private void debug(string myMessage)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage);
+            }
+        }
+        private void debug(string myMessage, double myMessage2)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2);
+            }
+        }
+        private void debug(double myMessage, string myMessage2)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2);
+            }
+        }
+        private void debug(string myMessage, double myMessage2, double myMessage3)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2, myMessage3);
+            }
+        }
+        private void debug(string myMessage, double myMessage2, string myMessage3)
+        {
+            if (IsDebug)
+            {
+                Print(myMessage, myMessage2, myMessage3);
+            }
+        }
+
+
+        //////////////////////////////////////////////////////////
+        // START - Play around with getFitness
+        //////////////////////////////////////////////////////////
+
+
+        protected override double GetFitness(GetFitnessArgs args)
+        {
+            //return _fit_winLossRatio(args);
+            //return _fit_MaxWinTrade_MinLosses(args);
+            //return _fit_MaxWinTrade_MinLosses2(args);
+            //return _fit_PessimisticReturnOnMargin(args);
+            return _fit_PessimisticReturnOnMarginDrawDown(args);
+        }
+
+        private double _fit_winLossRatio(GetFitnessArgs args)
+        {
+            return args.WinningTrades / (args.WinningTrades + args.LosingTrades + 1);
+        }
+        //maximize count of winning trades and minimize count of losing trades
+        private double _fit_MaxWinTrade_MinLosses(GetFitnessArgs args)
+        {
+            return (args.NetProfit * args.WinningTrades * TP) / (args.MaxEquityDrawdownPercentages * SL);
+        }
+        private double _fit_MaxWinTrade_MinLosses2(GetFitnessArgs args)
+        {
+            return (Math.Pow(args.NetProfit, 3) * Math.Pow(args.WinningTrades, 2) * (TP / SL)) / (Math.Pow(args.MaxEquityDrawdownPercentages, 2) * TP * SL * args.MaxEquityDrawdown);
+        }
+        private double _fit_PessimisticReturnOnMargin(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return (((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades - sqrtLosses))) / AccountSize) * 100;
+        }
+        // Add some sort of weighting to drawdown - not sure how mathmatically correct it is
+        private double _fit_PessimisticReturnOnMarginDrawDown(GetFitnessArgs args)
+        {
+            // Change the value below to your account size
+            var AccountSize = 10000;
+            // check for errors / wrong values
+            if (AccountSize < 1 || args.WinningTrades == 0 || args.LosingTrades == 0)
+            {
+                return 0;
+            }
+
+            double WinTradeTotal = 0.0;
+            double LossTradeTotal = 0.0;
+            int WinTradeCount = 0;
+            int LossTradeCount = 0;
+            double AvgWinningTrade = 0.0;
+            double AvgLosingTrade = 0.0;
+            foreach (HistoricalTrade trade in History)
+            {
+                if (trade.NetProfit > 0.01)
+                {
+                    WinTradeTotal = WinTradeTotal + trade.NetProfit;
+                    WinTradeCount++;
+                    //Print("WinTradeTotal: {0}, WinTradeCount {1}", WinTradeTotal, WinTradeCount);
+                }
+                else
+                {
+                    LossTradeTotal = LossTradeTotal + trade.NetProfit;
+                    LossTradeCount++;
+                    //Print("LossTradeTotal: {0}, LossTradeCount {1}", LossTradeTotal, LossTradeCount);
+                }
+            }
+            AvgWinningTrade = Math.Round(WinTradeTotal / WinTradeCount, 2);
+            AvgLosingTrade = (Math.Round(LossTradeTotal / LossTradeCount, 2) * -1);
+            //Print("AvgWinningTrade: {0}, AvgLosingTrade {1}", AvgWinningTrade, AvgLosingTrade);
+
+            var sqrtWins = Math.Sqrt(args.WinningTrades);
+            var sqrtLosses = Math.Sqrt(args.LosingTrades);
+
+            return ((((AvgWinningTrade * (args.WinningTrades - sqrtWins)) - (AvgLosingTrade * (args.LosingTrades + sqrtLosses))) / AccountSize) * 10000) / Math.Sqrt(args.MaxEquityDrawdownPercentages);
+        }
+
+        // END - Play around with getFitness
+
+    }
+}
