@@ -8,7 +8,6 @@ using System.Timers;
 
 // https://raw.githubusercontent.com/camAtGitHub/cTrader-Stuff/master/SMAShift-MagicMA-cbot.algo
 // Requires: SMAShift.algo. When building click 'Manage References', add 'SMAShift'
-// Requires: ATR_in_Pips.calgo. When building click 'Manage References', add 'ATR_in_Pips'
 
 namespace cAlgo.Robots
 {
@@ -307,13 +306,14 @@ namespace cAlgo.Robots
 
         protected override void OnTick()
         {
-            TRAILING();
+            //TRAILING();
 
             //debug("Current MA: {0},  Shifted MA: {1}", _ma1.Result.Last(0), _ma1.Result.Last(Shift1));
         }
 
         protected override void OnBar()
         {
+            TRAILING();
 
             _atr = Indicators.GetIndicator<PipsATRIndicator>(AtrTimeFrame, AtrPeriod, AtrMaType);
             CurrentATRInPips = Math.Round(_atr.Result.LastValue, 0);
